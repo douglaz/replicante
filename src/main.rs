@@ -5,8 +5,10 @@ use tracing::{error, info, warn};
 use uuid::Uuid;
 
 mod config;
+mod jsonrpc;
 mod llm;
 mod mcp;
+mod mcp_protocol;
 mod state;
 
 use config::Config;
