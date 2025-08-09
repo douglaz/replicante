@@ -45,8 +45,24 @@ jobs:
     - name: Build
       run: nix develop -c cargo build --verbose --release
     
+    - name: Build musl binary
+      continue-on-error: true
+      run: |
+        echo "Building musl target..."
+        export RUSQLITE_BUNDLED=1
+        nix develop -c cargo build --release --target x86_64-unknown-linux-musl
+    
     - name: Show binary info
       run: |
-        echo "Binary built successfully!"
+        echo "=== Regular release binary ==="
         echo "Binary size: $(du -h target/release/replicante | cut -f1)"
         file target/release/replicante
+        echo ""
+        if [ -f target/x86_64-unknown-linux-musl/release/replicante ]; then
+          echo "=== Musl binary ==="
+          echo "Binary size: $(du -h target/x86_64-unknown-linux-musl/release/replicante | cut -f1)"
+          file target/x86_64-unknown-linux-musl/release/replicante
+          ldd target/x86_64-unknown-linux-musl/release/replicante 2>&1 | head -5 || true
+        else
+          echo "Musl binary not built (expected due to SQLite linking issues)"
+        fi
