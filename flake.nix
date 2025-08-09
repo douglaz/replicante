@@ -119,6 +119,12 @@
             rust-analyzer
           ];
           
+          # Set environment variables for musl builds
+          RUSQLITE_BUNDLED = "1";
+          CC_x86_64_unknown_linux_musl = "cc -D_FORTIFY_SOURCE=0";
+          CFLAGS = "-D_FORTIFY_SOURCE=0";
+          CXXFLAGS = "-D_FORTIFY_SOURCE=0";
+          
           shellHook = ''
             echo "Replicante development environment"
             echo ""

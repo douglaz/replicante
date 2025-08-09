@@ -45,9 +45,6 @@ jobs:
     - name: Build musl binary
       run: |
         echo "Building musl target..."
-        export RUSQLITE_BUNDLED=1
-        export CFLAGS="-D_FORTIFY_SOURCE=0"
-        export CXXFLAGS="-D_FORTIFY_SOURCE=0"
         nix develop -c cargo build --release --target x86_64-unknown-linux-musl
     
     - name: Verify musl binary
