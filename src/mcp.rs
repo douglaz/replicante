@@ -51,9 +51,8 @@ impl MCPClient {
         // Initialize with some mock tools for testing
         if !servers.is_empty() {
             // Mock Nostr tools
-            if servers.iter().any(|s| s.name.contains("nostr")) {
-                if let Some(server) = servers.iter_mut().find(|s| s.name.contains("nostr")) {
-                    server.tools.push(Tool {
+            if let Some(server) = servers.iter_mut().find(|s| s.name.contains("nostr")) {
+                server.tools.push(Tool {
                         name: "nostr_publish".to_string(),
                         description: Some("Publish a message to Nostr".to_string()),
                         parameters: Some(serde_json::json!({
@@ -74,13 +73,11 @@ impl MCPClient {
                             }
                         })),
                     });
-                }
             }
 
             // Mock filesystem tools
-            if servers.iter().any(|s| s.name.contains("filesystem")) {
-                if let Some(server) = servers.iter_mut().find(|s| s.name.contains("filesystem")) {
-                    server.tools.push(Tool {
+            if let Some(server) = servers.iter_mut().find(|s| s.name.contains("filesystem")) {
+                server.tools.push(Tool {
                         name: "fs_read".to_string(),
                         description: Some("Read a file".to_string()),
                         parameters: Some(serde_json::json!({
@@ -101,13 +98,11 @@ impl MCPClient {
                             }
                         })),
                     });
-                }
             }
 
             // Mock HTTP tools
-            if servers.iter().any(|s| s.name.contains("http")) {
-                if let Some(server) = servers.iter_mut().find(|s| s.name.contains("http")) {
-                    server.tools.push(Tool {
+            if let Some(server) = servers.iter_mut().find(|s| s.name.contains("http")) {
+                server.tools.push(Tool {
                         name: "http_get".to_string(),
                         description: Some("Make an HTTP GET request".to_string()),
                         parameters: Some(serde_json::json!({
@@ -128,13 +123,11 @@ impl MCPClient {
                             }
                         })),
                     });
-                }
             }
 
             // Mock Bitcoin/Lightning tools
-            if servers.iter().any(|s| s.name.contains("bitcoin")) {
-                if let Some(server) = servers.iter_mut().find(|s| s.name.contains("bitcoin")) {
-                    server.tools.push(Tool {
+            if let Some(server) = servers.iter_mut().find(|s| s.name.contains("bitcoin")) {
+                server.tools.push(Tool {
                         name: "lightning_invoice".to_string(),
                         description: Some("Create a Lightning invoice".to_string()),
                         parameters: Some(serde_json::json!({
@@ -150,7 +143,6 @@ impl MCPClient {
                         description: Some("Check wallet balance".to_string()),
                         parameters: None,
                     });
-                }
             }
         }
 
