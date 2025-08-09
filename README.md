@@ -69,12 +69,23 @@ See `CUSTOM_GOALS.md` for detailed examples and `config-examples.toml` for pre-m
 
 ```
 src/
-├── main.rs    # Reasoning loop
-├── llm.rs     # LLM abstraction
-├── mcp.rs     # Tool usage via MCP
-├── state.rs   # Persistence
-└── config.rs  # Configuration
+├── main.rs         # Reasoning loop
+├── llm.rs          # LLM abstraction
+├── mcp.rs          # MCP client with JSON-RPC
+├── jsonrpc.rs      # JSON-RPC 2.0 implementation
+├── mcp_protocol.rs # MCP protocol messages
+├── state.rs        # Persistence
+└── config.rs       # Configuration
 ```
+
+### MCP Implementation
+
+Replicante now includes a **fully functional MCP client** that communicates with real MCP servers:
+- Spawns and manages MCP server processes
+- Uses JSON-RPC 2.0 over stdio for communication
+- Discovers tools dynamically via protocol handshake
+- Executes tools with proper error handling
+- See [MCP Implementation Details](docs/MCP_IMPLEMENTATION.md) for more information
 
 ## What It Does
 
