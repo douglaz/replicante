@@ -68,7 +68,9 @@
             pkgsStatic.stdenv.cc
           ];
           
-          buildInputs = [];
+          buildInputs = with pkgs.pkgsStatic; [
+            sqlite
+          ];
           
           # Force cargo to use the musl target
           CARGO_BUILD_TARGET = "x86_64-unknown-linux-musl";
@@ -76,12 +78,10 @@
           CC_x86_64_unknown_linux_musl = "${pkgs.pkgsStatic.stdenv.cc}/bin/${pkgs.pkgsStatic.stdenv.cc.targetPrefix}cc";
           CARGO_BUILD_RUSTFLAGS = "-C target-feature=+crt-static -C link-arg=-static";
           
-          # Disable FORTIFY_SOURCE to avoid glibc-specific functions
-          CFLAGS = "-D_FORTIFY_SOURCE=0";
-          CXXFLAGS = "-D_FORTIFY_SOURCE=0";
-          
-          # Use bundled SQLite
-          RUSQLITE_BUNDLED = "1";
+          # Use system SQLite
+          SQLITE3_LIB_DIR = "${pkgs.pkgsStatic.sqlite.out}/lib";
+          SQLITE3_INCLUDE_DIR = "${pkgs.pkgsStatic.sqlite.dev}/include";
+          SQLITE3_STATIC = "1";
           
           # Override cargo target dir to use musl subdirectory
           preBuild = ''
@@ -119,11 +119,11 @@
             rust-analyzer
           ];
           
-          # Set environment variables for musl builds
-          RUSQLITE_BUNDLED = "1";
-          CC_x86_64_unknown_linux_musl = "cc -D_FORTIFY_SOURCE=0";
-          CFLAGS = "-D_FORTIFY_SOURCE=0";
-          CXXFLAGS = "-D_FORTIFY_SOURCE=0";
+          # Set environment variables for SQLite linking
+          SQLITE3_LIB_DIR = "${pkgs.pkgsStatic.sqlite.out}/lib";
+          SQLITE3_INCLUDE_DIR = "${pkgs.pkgsStatic.sqlite.dev}/include";
+          SQLITE3_STATIC = "1";
+          PKG_CONFIG_PATH = "${pkgs.pkgsStatic.sqlite.dev}/lib/pkgconfig";
           
           shellHook = ''
             echo "Replicante development environment"

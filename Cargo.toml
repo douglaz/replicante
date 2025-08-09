@@ -13,8 +13,8 @@ tokio = { version = "1.41", features = ["full"] }
 # HTTP client for LLM APIs
 reqwest = { version = "0.11", default-features = false, features = ["rustls-tls", "json"] }
 
-# Database (bundled for static linking)
-rusqlite = { version = "0.30", features = ["bundled"] }
+# Database
+rusqlite = { version = "0.30", features = [] }
 
 # Serialization
 serde = { version = "1.0", features = ["derive"] }
