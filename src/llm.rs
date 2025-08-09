@@ -1,4 +1,4 @@
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 use async_trait::async_trait;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};

@@ -1,5 +1,5 @@
 use anyhow::Result;
-use rusqlite::{params, Connection, OptionalExtension};
+use rusqlite::{Connection, OptionalExtension, params};
 use serde_json::Value;
 use std::sync::{Arc, Mutex};
 use tracing::{debug, info};
