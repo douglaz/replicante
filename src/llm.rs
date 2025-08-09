@@ -1,7 +1,7 @@
-use anyhow::{Result, bail};
+use anyhow::{bail, Result};
 use async_trait::async_trait;
-use serde::{Deserialize, Serialize};
 use reqwest::Client;
+use serde::{Deserialize, Serialize};
 use std::time::Duration;
 use tracing::debug;
 
@@ -40,7 +40,9 @@ struct AnthropicProvider {
 
 impl AnthropicProvider {
     fn new(config: &LLMConfig) -> Result<Self> {
-        let api_key = config.api_key.clone()
+        let api_key = config
+            .api_key
+            .clone()
             .or_else(|| std::env::var("ANTHROPIC_API_KEY").ok())
             .ok_or_else(|| anyhow::anyhow!("Anthropic API key not found"))?;
 
@@ -60,7 +62,7 @@ impl AnthropicProvider {
 impl LLMProvider for AnthropicProvider {
     async fn complete(&self, prompt: &str) -> Result<String> {
         debug!("Sending request to Anthropic API");
-        
+
         let request_body = serde_json::json!({
             "model": self.model,
             "messages": [{
@@ -71,7 +73,8 @@ impl LLMProvider for AnthropicProvider {
             "temperature": self.temperature
         });
 
-        let response = self.client
+        let response = self
+            .client
             .post("https://api.anthropic.com/v1/messages")
             .header("x-api-key", &self.api_key)
             .header("anthropic-version", "2023-06-01")
@@ -86,7 +89,7 @@ impl LLMProvider for AnthropicProvider {
         }
 
         let response_json: serde_json::Value = response.json().await?;
-        
+
         let content = response_json["content"][0]["text"]
             .as_str()
             .ok_or_else(|| anyhow::anyhow!("Invalid response from Anthropic API"))?;
@@ -107,11 +110,15 @@ struct OpenAIProvider {
 
 impl OpenAIProvider {
     fn new(config: &LLMConfig) -> Result<Self> {
-        let api_key = config.api_key.clone()
+        let api_key = config
+            .api_key
+            .clone()
             .or_else(|| std::env::var("OPENAI_API_KEY").ok())
             .ok_or_else(|| anyhow::anyhow!("OpenAI API key not found"))?;
 
-        let api_url = config.api_url.clone()
+        let api_url = config
+            .api_url
+            .clone()
             .unwrap_or_else(|| "https://api.openai.com/v1/chat/completions".to_string());
 
         Ok(Self {
@@ -131,7 +138,7 @@ impl OpenAIProvider {
 impl LLMProvider for OpenAIProvider {
     async fn complete(&self, prompt: &str) -> Result<String> {
         debug!("Sending request to OpenAI API");
-        
+
         let request_body = serde_json::json!({
             "model": self.model,
             "messages": [{
@@ -142,7 +149,8 @@ impl LLMProvider for OpenAIProvider {
             "temperature": self.temperature
         });
 
-        let response = self.client
+        let response = self
+            .client
             .post(&self.api_url)
             .header("Authorization", format!("Bearer {}", self.api_key))
             .json(&request_body)
@@ -155,7 +163,7 @@ impl LLMProvider for OpenAIProvider {
         }
 
         let response_json: serde_json::Value = response.json().await?;
-        
+
         let content = response_json["choices"][0]["message"]["content"]
             .as_str()
             .ok_or_else(|| anyhow::anyhow!("Invalid response from OpenAI API"))?;
@@ -173,7 +181,9 @@ struct OllamaProvider {
 
 impl OllamaProvider {
     fn new(config: &LLMConfig) -> Result<Self> {
-        let api_url = config.api_url.clone()
+        let api_url = config
+            .api_url
+            .clone()
             .or_else(|| std::env::var("OLLAMA_HOST").ok())
             .unwrap_or_else(|| "http://localhost:11434".to_string());
 
@@ -191,14 +201,15 @@ impl OllamaProvider {
 impl LLMProvider for OllamaProvider {
     async fn complete(&self, prompt: &str) -> Result<String> {
         debug!("Sending request to Ollama API");
-        
+
         let request_body = serde_json::json!({
             "model": self.model,
             "prompt": prompt,
             "stream": false
         });
 
-        let response = self.client
+        let response = self
+            .client
             .post(format!("{}/api/generate", self.api_url))
             .json(&request_body)
             .send()
@@ -210,7 +221,7 @@ impl LLMProvider for OllamaProvider {
         }
 
         let response_json: serde_json::Value = response.json().await?;
-        
+
         let content = response_json["response"]
             .as_str()
             .ok_or_else(|| anyhow::anyhow!("Invalid response from Ollama API"))?;

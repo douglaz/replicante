@@ -1,7 +1,7 @@
 use anyhow::Result;
 use chrono::Utc;
 use std::time::Duration;
-use tracing::{info, warn, error};
+use tracing::{error, info, warn};
 use uuid::Uuid;
 
 mod config;
@@ -31,10 +31,20 @@ struct Thought {
 
 #[derive(Debug)]
 enum Action {
-    UseTool { name: String, params: serde_json::Value },
-    Think { about: String },
-    Remember { key: String, value: serde_json::Value },
-    Wait { duration: Duration },
+    UseTool {
+        name: String,
+        params: serde_json::Value,
+    },
+    Think {
+        about: String,
+    },
+    Remember {
+        key: String,
+        value: serde_json::Value,
+    },
+    Wait {
+        duration: Duration,
+    },
     Explore,
 }
 
@@ -58,7 +68,7 @@ impl Replicante {
 
         // Load configuration
         let config = Config::load()?;
-        
+
         // Generate unique agent ID
         let id = format!("replicante-{}", Uuid::new_v4());
         info!("Agent ID: {}", id);
@@ -69,23 +79,32 @@ impl Replicante {
 
         // Initialize MCP client
         let mcp = MCPClient::new(&config.mcp_servers).await?;
-        info!("MCP client initialized with {} servers", config.mcp_servers.len());
+        info!(
+            "MCP client initialized with {} servers",
+            config.mcp_servers.len()
+        );
 
         // Initialize state manager
         let state = StateManager::new(&config.database_path)?;
         info!("State manager initialized");
 
         // Record birth
-        state.remember("agent_id", serde_json::json!(id.clone())).await?;
-        state.remember("birth_time", serde_json::json!(Utc::now())).await?;
+        state
+            .remember("agent_id", serde_json::json!(id.clone()))
+            .await?;
+        state
+            .remember("birth_time", serde_json::json!(Utc::now()))
+            .await?;
 
         // Get initial goals from config or use default
         let goals = config.agent.initial_goals.clone().unwrap_or_else(|| {
             "Your primary goal is to survive and thrive autonomously on the internet.".to_string()
         });
-        
+
         // Store initial goals in memory
-        state.remember("initial_goals", serde_json::json!(goals.clone())).await?;
+        state
+            .remember("initial_goals", serde_json::json!(goals.clone()))
+            .await?;
         info!("Agent goals: {}", goals);
 
         Ok(Self {
@@ -103,10 +122,10 @@ impl Replicante {
 
         // Get current memory state
         let memory = self.state.get_memory().await?;
-        
+
         // Get available tools from MCP
         let available_tools = self.mcp.list_tools().await?;
-        
+
         // Get recent events/decisions
         let recent_events = self.state.get_recent_decisions(10).await?;
 
@@ -152,10 +171,10 @@ Format your response as JSON with keys: reasoning, confidence, proposed_actions"
         );
 
         let response = self.llm.complete(&prompt).await?;
-        
+
         // Parse LLM response
-        let thought_json: serde_json::Value = serde_json::from_str(&response)
-            .unwrap_or_else(|_| {
+        let thought_json: serde_json::Value =
+            serde_json::from_str(&response).unwrap_or_else(|_| {
                 serde_json::json!({
                     "reasoning": response,
                     "confidence": 0.5,
@@ -168,9 +187,11 @@ Format your response as JSON with keys: reasoning, confidence, proposed_actions"
             confidence: thought_json["confidence"].as_f64().unwrap_or(0.5),
             proposed_actions: thought_json["proposed_actions"]
                 .as_array()
-                .map(|arr| arr.iter()
-                    .filter_map(|v| v.as_str().map(String::from))
-                    .collect())
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(|v| v.as_str().map(String::from))
+                        .collect()
+                })
                 .unwrap_or_default(),
         })
     }
@@ -179,11 +200,13 @@ Format your response as JSON with keys: reasoning, confidence, proposed_actions"
         info!("Deciding on action based on thought...");
 
         // Record the thought
-        self.state.record_decision(
-            &thought.reasoning,
-            &format!("{:?}", thought.proposed_actions),
-            None
-        ).await?;
+        self.state
+            .record_decision(
+                &thought.reasoning,
+                &format!("{:?}", thought.proposed_actions),
+                None,
+            )
+            .await?;
 
         // For now, simple decision logic - can be enhanced
         if thought.proposed_actions.is_empty() {
@@ -192,7 +215,7 @@ Format your response as JSON with keys: reasoning, confidence, proposed_actions"
 
         // Parse first proposed action
         let first_action = &thought.proposed_actions[0];
-        
+
         if first_action.starts_with("use_tool:") {
             let parts: Vec<&str> = first_action.splitn(2, ':').collect();
             if parts.len() == 2 {
@@ -202,7 +225,7 @@ Format your response as JSON with keys: reasoning, confidence, proposed_actions"
                 });
             }
         }
-        
+
         if first_action.starts_with("remember:") {
             let parts: Vec<&str> = first_action.splitn(3, ':').collect();
             if parts.len() >= 2 {
@@ -218,8 +241,8 @@ Format your response as JSON with keys: reasoning, confidence, proposed_actions"
         }
 
         if first_action == "wait" {
-            return Ok(Action::Wait { 
-                duration: Duration::from_secs(60) 
+            return Ok(Action::Wait {
+                duration: Duration::from_secs(60),
             });
         }
 
@@ -233,20 +256,17 @@ Format your response as JSON with keys: reasoning, confidence, proposed_actions"
         info!("Executing action: {:?}", action);
 
         match action {
-            Action::UseTool { name, params } => {
-                match self.mcp.use_tool(&name, params).await {
-                    Ok(result) => {
-                        info!("Tool {} executed successfully", name);
-                        self.state.remember(
-                            &format!("tool_result_{}", Utc::now().timestamp()),
-                            result
-                        ).await?;
-                    }
-                    Err(e) => {
-                        warn!("Tool execution failed: {}", e);
-                    }
+            Action::UseTool { name, params } => match self.mcp.use_tool(&name, params).await {
+                Ok(result) => {
+                    info!("Tool {} executed successfully", name);
+                    self.state
+                        .remember(&format!("tool_result_{}", Utc::now().timestamp()), result)
+                        .await?;
                 }
-            }
+                Err(e) => {
+                    warn!("Tool execution failed: {}", e);
+                }
+            },
             Action::Think { about } => {
                 info!("Deep thinking about: {}", about);
                 // Could trigger more complex reasoning here
@@ -263,7 +283,9 @@ Format your response as JSON with keys: reasoning, confidence, proposed_actions"
                 info!("Exploring capabilities...");
                 // Discover new tools or opportunities
                 let tools = self.mcp.discover_tools().await?;
-                self.state.remember("discovered_tools", serde_json::json!(tools)).await?;
+                self.state
+                    .remember("discovered_tools", serde_json::json!(tools))
+                    .await?;
             }
         }
 
@@ -273,7 +295,7 @@ Format your response as JSON with keys: reasoning, confidence, proposed_actions"
     async fn learn(&mut self) -> Result<()> {
         // Analyze recent decisions and outcomes
         let recent = self.state.get_recent_decisions(5).await?;
-        
+
         if !recent.is_empty() {
             info!("Learning from {} recent decisions", recent.len());
             // Could implement learning algorithms here
@@ -293,10 +315,12 @@ Format your response as JSON with keys: reasoning, confidence, proposed_actions"
                 Err(e) => {
                     error!("Error in reasoning cycle: {}", e);
                     // Log error but continue running
-                    self.state.remember(
-                        &format!("error_{}", Utc::now().timestamp()),
-                        serde_json::json!({ "error": e.to_string() })
-                    ).await?;
+                    self.state
+                        .remember(
+                            &format!("error_{}", Utc::now().timestamp()),
+                            serde_json::json!({ "error": e.to_string() }),
+                        )
+                        .await?;
                 }
             }
 
@@ -308,16 +332,16 @@ Format your response as JSON with keys: reasoning, confidence, proposed_actions"
     async fn reasoning_cycle(&mut self) -> Result<()> {
         // Observe
         let observation = self.observe().await?;
-        
+
         // Think
         let thought = self.think(observation).await?;
-        
+
         // Decide
         let action = self.decide(thought).await?;
-        
+
         // Act
         self.act(action).await?;
-        
+
         // Learn
         self.learn().await?;
 
@@ -332,9 +356,9 @@ async fn main() -> Result<()> {
 
     // Create and run the agent
     let agent = Replicante::new().await?;
-    
+
     info!("Replicante initialized successfully");
     info!("Beginning autonomous operation...");
-    
+
     agent.run().await
 }
