@@ -76,6 +76,10 @@
           CC_x86_64_unknown_linux_musl = "${pkgs.pkgsStatic.stdenv.cc}/bin/${pkgs.pkgsStatic.stdenv.cc.targetPrefix}cc";
           CARGO_BUILD_RUSTFLAGS = "-C target-feature=+crt-static -C link-arg=-static";
           
+          # Disable FORTIFY_SOURCE to avoid glibc-specific functions
+          CFLAGS = "-D_FORTIFY_SOURCE=0";
+          CXXFLAGS = "-D_FORTIFY_SOURCE=0";
+          
           # Use bundled SQLite
           RUSQLITE_BUNDLED = "1";
           

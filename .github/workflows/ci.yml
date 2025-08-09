@@ -42,27 +42,24 @@ jobs:
     - name: Run tests
       run: nix develop -c cargo test --verbose
     
-    - name: Build
-      run: nix develop -c cargo build --verbose --release
-    
     - name: Build musl binary
-      continue-on-error: true
       run: |
         echo "Building musl target..."
         export RUSQLITE_BUNDLED=1
+        export CFLAGS="-D_FORTIFY_SOURCE=0"
+        export CXXFLAGS="-D_FORTIFY_SOURCE=0"
         nix develop -c cargo build --release --target x86_64-unknown-linux-musl
     
-    - name: Show binary info
+    - name: Verify musl binary
       run: |
-        echo "=== Regular release binary ==="
-        echo "Binary size: $(du -h target/release/replicante | cut -f1)"
-        file target/release/replicante
+        echo "=== Musl binary info ==="
+        echo "Binary size: $(du -h target/x86_64-unknown-linux-musl/release/replicante | cut -f1)"
+        file target/x86_64-unknown-linux-musl/release/replicante
         echo ""
-        if [ -f target/x86_64-unknown-linux-musl/release/replicante ]; then
-          echo "=== Musl binary ==="
-          echo "Binary size: $(du -h target/x86_64-unknown-linux-musl/release/replicante | cut -f1)"
-          file target/x86_64-unknown-linux-musl/release/replicante
-          ldd target/x86_64-unknown-linux-musl/release/replicante 2>&1 | head -5 || true
+        echo "Checking for dynamic dependencies:"
+        if ldd target/x86_64-unknown-linux-musl/release/replicante 2>&1 | grep -q "not a dynamic executable"; then
+          echo "✅ Binary is statically linked (no dynamic dependencies)"
         else
-          echo "Musl binary not built (expected due to SQLite linking issues)"
+          echo "Binary dependencies:"
+          ldd target/x86_64-unknown-linux-musl/release/replicante || true
         fi
