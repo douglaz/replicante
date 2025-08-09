@@ -1,7 +1,7 @@
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
-use std::path::Path;
 use std::fs;
+use std::path::Path;
 
 use crate::llm::LLMConfig;
 use crate::mcp::MCPServerConfig;
@@ -30,11 +30,11 @@ impl Config {
             let config: Config = toml::from_str(&contents)?;
             return Ok(config);
         }
-        
+
         // Fall back to default configuration
         Ok(Self::default())
     }
-    
+
     pub fn default() -> Self {
         Self {
             agent: AgentConfig {
@@ -45,7 +45,8 @@ impl Config {
             llm: LLMConfig {
                 provider: std::env::var("LLM_PROVIDER").unwrap_or_else(|_| "anthropic".to_string()),
                 api_key: None, // Will be loaded from environment
-                model: std::env::var("LLM_MODEL").unwrap_or_else(|_| "claude-3-opus-20240229".to_string()),
+                model: std::env::var("LLM_MODEL")
+                    .unwrap_or_else(|_| "claude-3-opus-20240229".to_string()),
                 temperature: Some(0.7),
                 max_tokens: Some(4000),
                 api_url: None,
@@ -85,7 +86,7 @@ impl Config {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_default_config() {
         let config = Config::default();

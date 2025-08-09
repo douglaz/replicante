@@ -1,0 +1,62 @@
+name: CI
+
+on:
+  push:
+    branches: [ master, main ]
+  pull_request:
+    branches: [ master, main ]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Install Nix
+      uses: cachix/install-nix-action@v22
+      with:
+        extra_nix_config: |
+          experimental-features = nix-command flakes
+    
+    - name: Setup Magic Nix Cache
+      uses: DeterminateSystems/magic-nix-cache-action@main
+    
+    - name: Cache cargo registry
+      uses: actions/cache@v3
+      with:
+        path: |
+          ~/.cargo/registry/index/
+          ~/.cargo/registry/cache/
+          ~/.cargo/git/db/
+        key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+        restore-keys: |
+          ${{ runner.os }}-cargo-registry-
+    
+    - name: Check formatting
+      run: nix develop -c cargo fmt -- --check
+    
+    - name: Run clippy
+      run: nix develop -c cargo clippy -- -D warnings
+    
+    - name: Run tests
+      run: nix develop -c cargo test --verbose
+    
+    - name: Build
+      run: nix develop -c cargo build --verbose --release
+    
+    # TODO: Re-enable once we fix the Nix static build performance
+    # - name: Build static binary with Nix
+    #   run: nix build .#replicante-static
+    
+    # - name: Verify static linking
+    #   run: |
+    #     echo "Checking if binary is statically linked..."
+    #     if ldd result/bin/replicante 2>&1 | grep -q "not a dynamic executable"; then
+    #       echo "✅ Binary is statically linked"
+    #     else
+    #       echo "❌ Binary has dynamic dependencies:"
+    #       ldd result/bin/replicante
+    #       exit 1
+    #     fi
+    #     echo "Binary size: $(du -h result/bin/replicante | cut -f1)"

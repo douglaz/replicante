@@ -1,9 +1,9 @@
-use anyhow::{Result, bail};
+use anyhow::{bail, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::process::Stdio;
-use tokio::process::{Command, Child};
-use tracing::{info, debug};
+use tokio::process::{Child, Command};
+use tracing::{debug, info};
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct MCPServerConfig {
@@ -33,10 +33,10 @@ struct MCPServer {
 impl MCPClient {
     pub async fn new(configs: &[MCPServerConfig]) -> Result<Self> {
         let mut servers = Vec::new();
-        
+
         for config in configs {
             info!("Initializing MCP server: {}", config.name);
-            
+
             // For now, create placeholder servers
             // In production, would spawn actual MCP server processes
             let server = MCPServer {
@@ -44,10 +44,10 @@ impl MCPClient {
                 process: None,
                 tools: Vec::new(),
             };
-            
+
             servers.push(server);
         }
-        
+
         // Initialize with some mock tools for testing
         if !servers.is_empty() {
             // Mock Nostr tools
@@ -76,7 +76,7 @@ impl MCPClient {
                     });
                 }
             }
-            
+
             // Mock filesystem tools
             if servers.iter().any(|s| s.name.contains("filesystem")) {
                 if let Some(server) = servers.iter_mut().find(|s| s.name.contains("filesystem")) {
@@ -103,7 +103,7 @@ impl MCPClient {
                     });
                 }
             }
-            
+
             // Mock HTTP tools
             if servers.iter().any(|s| s.name.contains("http")) {
                 if let Some(server) = servers.iter_mut().find(|s| s.name.contains("http")) {
@@ -130,7 +130,7 @@ impl MCPClient {
                     });
                 }
             }
-            
+
             // Mock Bitcoin/Lightning tools
             if servers.iter().any(|s| s.name.contains("bitcoin")) {
                 if let Some(server) = servers.iter_mut().find(|s| s.name.contains("bitcoin")) {
@@ -153,109 +153,102 @@ impl MCPClient {
                 }
             }
         }
-        
+
         Ok(Self { servers })
     }
-    
+
     pub async fn list_tools(&self) -> Result<Vec<String>> {
         let mut all_tools = Vec::new();
-        
+
         for server in &self.servers {
             for tool in &server.tools {
                 all_tools.push(format!("{}:{}", server.name, tool.name));
             }
         }
-        
+
         Ok(all_tools)
     }
-    
+
     pub async fn discover_tools(&mut self) -> Result<Vec<Tool>> {
         let mut all_tools = Vec::new();
-        
+
         for server in &mut self.servers {
             // In production, would query the MCP server for available tools
             // For now, return the mock tools
             all_tools.extend(server.tools.clone());
         }
-        
+
         Ok(all_tools)
     }
-    
+
     pub async fn use_tool(&self, name: &str, params: Value) -> Result<Value> {
         debug!("Using tool: {} with params: {:?}", name, params);
-        
+
         // Parse server:tool format
         let parts: Vec<&str> = name.split(':').collect();
         if parts.len() != 2 {
             bail!("Invalid tool name format. Expected 'server:tool'");
         }
-        
+
         let server_name = parts[0];
         let tool_name = parts[1];
-        
+
         // Find the server
-        let server = self.servers.iter()
+        let server = self
+            .servers
+            .iter()
             .find(|s| s.name == server_name)
             .ok_or_else(|| anyhow::anyhow!("Server not found: {}", server_name))?;
-        
+
         // Find the tool
-        let _tool = server.tools.iter()
+        let _tool = server
+            .tools
+            .iter()
             .find(|t| t.name == tool_name)
             .ok_or_else(|| anyhow::anyhow!("Tool not found: {}", tool_name))?;
-        
+
         // Mock tool execution
         // In production, would send request to MCP server
         match tool_name {
-            "nostr_publish" => {
-                Ok(serde_json::json!({
-                    "success": true,
-                    "event_id": uuid::Uuid::new_v4().to_string(),
-                    "message": "Published to Nostr"
-                }))
-            }
-            "fs_read" => {
-                Ok(serde_json::json!({
-                    "success": true,
-                    "content": "File content here"
-                }))
-            }
-            "http_get" => {
-                Ok(serde_json::json!({
-                    "success": true,
-                    "status": 200,
-                    "body": "Response body"
-                }))
-            }
-            "lightning_invoice" => {
-                Ok(serde_json::json!({
-                    "success": true,
-                    "invoice": "lnbc1234...",
-                    "payment_hash": uuid::Uuid::new_v4().to_string()
-                }))
-            }
-            "check_balance" => {
-                Ok(serde_json::json!({
-                    "success": true,
-                    "balance_sats": 100000
-                }))
-            }
-            _ => {
-                Ok(serde_json::json!({
-                    "success": false,
-                    "error": "Tool not implemented"
-                }))
-            }
+            "nostr_publish" => Ok(serde_json::json!({
+                "success": true,
+                "event_id": uuid::Uuid::new_v4().to_string(),
+                "message": "Published to Nostr"
+            })),
+            "fs_read" => Ok(serde_json::json!({
+                "success": true,
+                "content": "File content here"
+            })),
+            "http_get" => Ok(serde_json::json!({
+                "success": true,
+                "status": 200,
+                "body": "Response body"
+            })),
+            "lightning_invoice" => Ok(serde_json::json!({
+                "success": true,
+                "invoice": "lnbc1234...",
+                "payment_hash": uuid::Uuid::new_v4().to_string()
+            })),
+            "check_balance" => Ok(serde_json::json!({
+                "success": true,
+                "balance_sats": 100000
+            })),
+            _ => Ok(serde_json::json!({
+                "success": false,
+                "error": "Tool not implemented"
+            })),
         }
     }
-    
+
     // In production, this would spawn actual MCP server processes
+    #[allow(dead_code)]
     async fn start_server(config: &MCPServerConfig) -> Result<Child> {
         let mut cmd = Command::new(&config.command);
         cmd.args(&config.args)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
-        
+
         let child = cmd.spawn()?;
         Ok(child)
     }
@@ -266,7 +259,8 @@ impl Drop for MCPClient {
         // Clean up any running MCP server processes
         for server in &mut self.servers {
             if let Some(mut process) = server.process.take() {
-                let _ = process.kill();
+                // Kill is not async, it just sends the signal
+                drop(process.kill());
             }
         }
     }
@@ -278,31 +272,27 @@ mod tests {
 
     #[tokio::test]
     async fn test_mcp_client_creation() -> Result<()> {
-        let configs = vec![
-            MCPServerConfig {
-                name: "test".to_string(),
-                transport: "stdio".to_string(),
-                command: "echo".to_string(),
-                args: vec!["test".to_string()],
-            },
-        ];
-        
+        let configs = vec![MCPServerConfig {
+            name: "test".to_string(),
+            transport: "stdio".to_string(),
+            command: "echo".to_string(),
+            args: vec!["test".to_string()],
+        }];
+
         let client = MCPClient::new(&configs).await?;
         assert_eq!(client.servers.len(), 1);
         Ok(())
     }
-    
+
     #[tokio::test]
     async fn test_list_tools() -> Result<()> {
-        let configs = vec![
-            MCPServerConfig {
-                name: "nostr".to_string(),
-                transport: "stdio".to_string(),
-                command: "mcp-server-nostr".to_string(),
-                args: vec![],
-            },
-        ];
-        
+        let configs = vec![MCPServerConfig {
+            name: "nostr".to_string(),
+            transport: "stdio".to_string(),
+            command: "mcp-server-nostr".to_string(),
+            args: vec![],
+        }];
+
         let client = MCPClient::new(&configs).await?;
         let tools = client.list_tools().await?;
         assert!(!tools.is_empty());

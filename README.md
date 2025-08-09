@@ -84,18 +84,48 @@ src/
 4. **Acts** - Executes actions via MCP tools
 5. **Learns** - Remembers outcomes for future decisions
 
+## Building Static Binary
+
+### Using Nix (Recommended)
+```bash
+# Build static musl binary
+nix build .#replicante-static
+
+# Verify it's static
+ldd result/bin/replicante  # Should say "not a dynamic executable"
+```
+
+### Using Cargo directly
+```bash
+# Install musl target
+rustup target add x86_64-unknown-linux-musl
+
+# Build static binary
+./scripts/build-static.sh
+
+# Or manually:
+RUSQLITE_BUNDLED=1 cargo build --release --target x86_64-unknown-linux-musl
+```
+
 ## Deployment
 
 ```bash
 # Build static binary
 nix build .#replicante-static
 
-# Deploy to server
+# Deploy to server (works on any Linux x86_64)
 scp result/bin/replicante server:/usr/local/bin/
 
-# Run on server
+# Run on server (no dependencies needed!)
 ssh server 'ANTHROPIC_API_KEY=sk-... /usr/local/bin/replicante'
 ```
+
+The static binary:
+- Has no runtime dependencies
+- Works on any Linux x86_64 system
+- Includes bundled SQLite
+- Uses rustls (no OpenSSL needed)
+- Is optimized for size (~10-20MB)
 
 ## MCP Tools
 
