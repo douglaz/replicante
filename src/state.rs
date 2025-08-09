@@ -71,6 +71,7 @@ impl StateManager {
         Ok(())
     }
 
+    #[allow(dead_code)]
     pub async fn recall(&self, key: &str) -> Result<Option<Value>> {
         let conn = self.conn.lock().unwrap();
 
@@ -155,6 +156,7 @@ impl StateManager {
         Ok(results)
     }
 
+    #[allow(dead_code)]
     pub async fn record_capability(
         &self,
         tool_name: &str,
@@ -177,12 +179,10 @@ impl StateManager {
             let new_rate = if let Some(rate) = current_rate {
                 // Simple moving average
                 (rate * 0.9) + (if success { 0.1 } else { 0.0 })
+            } else if success {
+                1.0
             } else {
-                if success {
-                    1.0
-                } else {
-                    0.0
-                }
+                0.0
             };
 
             conn.execute(
@@ -205,6 +205,7 @@ impl StateManager {
         Ok(())
     }
 
+    #[allow(dead_code)]
     pub async fn get_capabilities(&self) -> Result<Vec<(String, Option<String>, Option<f64>)>> {
         let conn = self.conn.lock().unwrap();
 

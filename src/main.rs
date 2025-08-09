@@ -25,6 +25,7 @@ struct Observation {
 #[derive(Debug)]
 struct Thought {
     reasoning: String,
+    #[allow(dead_code)]
     confidence: f64,
     proposed_actions: Vec<String>,
 }
@@ -53,6 +54,7 @@ struct Replicante {
     llm: Box<dyn LLMProvider>,
     mcp: MCPClient,
     state: StateManager,
+    #[allow(dead_code)]
     config: Config,
     goals: String,
 }

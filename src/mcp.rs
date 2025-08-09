@@ -241,6 +241,7 @@ impl MCPClient {
     }
 
     // In production, this would spawn actual MCP server processes
+    #[allow(dead_code)]
     async fn start_server(config: &MCPServerConfig) -> Result<Child> {
         let mut cmd = Command::new(&config.command);
         cmd.args(&config.args)
@@ -258,7 +259,8 @@ impl Drop for MCPClient {
         // Clean up any running MCP server processes
         for server in &mut self.servers {
             if let Some(mut process) = server.process.take() {
-                let _ = process.kill();
+                // Kill is not async, it just sends the signal
+                drop(process.kill());
             }
         }
     }
