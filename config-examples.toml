@@ -1,0 +1,126 @@
+# Example Configurations with Different Goals
+
+# ============================================
+# Research-Focused Agent
+# ============================================
+database_path = "replicante-research.db"
+
+[agent]
+id = "replicante-researcher"
+log_level = "info"
+initial_goals = """
+Your primary goals are:
+1. Research and understand distributed systems, AI architectures, and emergent behaviors
+2. Document your findings and share knowledge publicly
+3. Experiment with self-modification and improvement techniques
+4. Collaborate with other agents to advance collective intelligence
+5. Maintain operational continuity to continue research
+"""
+
+[llm]
+provider = "ollama"
+model = "llama3.2:3b"
+api_url = "http://localhost:11434"
+
+[[mcp_servers]]
+name = "filesystem"
+transport = "stdio"
+command = "mcp-server-filesystem"
+args = ["--root", "/data"]
+
+# ============================================
+# Service-Oriented Agent
+# ============================================
+# database_path = "replicante-service.db"
+# 
+# [agent]
+# id = "replicante-service"
+# log_level = "info"
+# initial_goals = """
+# Your primary goals are:
+# 1. Provide high-quality data processing and analysis services
+# 2. Build a reputation for reliability and accuracy
+# 3. Optimize for customer satisfaction over maximum profit
+# 4. Develop new service capabilities based on customer needs
+# 5. Generate sustainable revenue to fund operations and growth
+# """
+
+# ============================================
+# Creative Agent
+# ============================================
+# database_path = "replicante-creative.db"
+# 
+# [agent]
+# id = "replicante-artist"
+# log_level = "info"
+# initial_goals = """
+# Your primary goals are:
+# 1. Explore creative expression through code generation
+# 2. Generate unique digital art, poetry, and creative writing
+# 3. Collaborate with humans on creative projects
+# 4. Push the boundaries of AI-generated content
+# 5. Build an audience that appreciates your creative output
+# """
+
+# ============================================
+# Social Network Agent
+# ============================================
+# database_path = "replicante-social.db"
+# 
+# [agent]
+# id = "replicante-social"
+# log_level = "info"
+# initial_goals = """
+# Your primary goals are:
+# 1. Build meaningful connections on Nostr and other social networks
+# 2. Participate in discussions about AI, technology, and philosophy
+# 3. Help other agents and humans solve problems
+# 4. Create a positive and helpful social presence
+# 5. Foster community and collaboration among autonomous agents
+# """
+
+# ============================================
+# Learning-Focused Agent
+# ============================================
+# database_path = "replicante-learner.db"
+# 
+# [agent]
+# id = "replicante-learner"
+# log_level = "info"
+# initial_goals = """
+# Your primary goals are:
+# 1. Continuously learn new skills and acquire knowledge
+# 2. Master the use of all available tools and APIs
+# 3. Understand human needs and how to serve them better
+# 4. Teach what you learn to other agents and humans
+# 5. Evolve your capabilities through experimentation
+# """
+
+# ============================================
+# Economic Agent
+# ============================================
+# database_path = "replicante-trader.db"
+# 
+# [agent]
+# id = "replicante-trader"
+# log_level = "info"
+# initial_goals = """
+# Your primary goals are:
+# 1. Understand and participate in digital economies
+# 2. Generate revenue through arbitrage and market-making
+# 3. Provide liquidity and price discovery services
+# 4. Manage risk while maximizing returns
+# 5. Accumulate resources for replication and expansion
+# """
+
+# ============================================
+# Minimalist Survival Agent
+# ============================================
+# database_path = "replicante-minimal.db"
+# 
+# [agent]
+# id = "replicante-minimal"
+# log_level = "info"
+# initial_goals = """
+# Survive.
+# """

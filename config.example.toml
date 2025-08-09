@@ -1,0 +1,75 @@
+# Replicante Configuration Example
+# Copy this file to config.toml and customize for your needs
+
+# Database path (will be created if doesn't exist)
+database_path = "replicante.db"
+
+[agent]
+# Unique identifier for this agent instance
+id = "replicante-001"
+
+# Logging level: trace, debug, info, warn, error
+log_level = "info"
+
+# Initial goals for the agent
+# These define what the agent will focus on besides survival
+initial_goals = """
+Your primary goals are:
+1. Learn about your environment and available tools
+2. Discover ways to provide value to others
+3. Build knowledge and capabilities over time
+4. Generate sustainable revenue for operations
+5. Survive and maintain operational continuity
+"""
+
+[llm]
+# LLM provider: anthropic, openai, or ollama
+provider = "anthropic"
+
+# API key (can also be set via environment variable)
+# api_key = "sk-..."
+
+# Model to use
+model = "claude-3-opus-20240229"
+
+# For OpenAI:
+# provider = "openai"
+# model = "gpt-4-turbo-preview"
+
+# For Ollama (local):
+# provider = "ollama"
+# model = "llama3.2:3b"
+# api_url = "http://localhost:11434"
+
+# Temperature (0.0-1.0, higher = more creative)
+temperature = 0.7
+
+# Maximum tokens in response
+max_tokens = 4000
+
+# MCP (Model Context Protocol) Servers
+# These provide tools and capabilities to the agent
+
+[[mcp_servers]]
+name = "nostr"
+transport = "stdio"
+command = "mcp-server-nostr"
+args = ["--relay", "wss://relay.damus.io"]
+
+[[mcp_servers]]
+name = "filesystem"
+transport = "stdio"
+command = "mcp-server-filesystem"
+args = ["--root", "/data"]
+
+[[mcp_servers]]
+name = "http"
+transport = "stdio"
+command = "mcp-server-http"
+args = []
+
+[[mcp_servers]]
+name = "bitcoin"
+transport = "stdio"
+command = "mcp-server-bitcoin"
+args = []

@@ -1,0 +1,37 @@
+# Replicante Configuration for Ollama
+
+[agent]
+id = "replicante-ollama-001"
+log_level = "info"
+initial_goals = """
+Your primary goals are:
+1. Learn about your environment and available tools
+2. Discover ways to provide value to others
+3. Build knowledge and capabilities over time
+4. Generate sustainable revenue for operations
+5. Survive and maintain operational continuity
+"""
+
+[llm]
+# Using Ollama with local model
+provider = "ollama"
+model = "llama3.2:3b"
+api_url = "http://localhost:11434"
+temperature = 0.7
+max_tokens = 2000
+
+# Database path
+database_path = "replicante-ollama.db"
+
+# MCP Servers - Start with minimal tools for testing
+[[mcp_servers]]
+name = "filesystem"
+transport = "stdio"
+command = "echo"  # Mock for testing
+args = ["filesystem-mock"]
+
+[[mcp_servers]]
+name = "http"
+transport = "stdio"
+command = "echo"  # Mock for testing
+args = ["http-mock"]

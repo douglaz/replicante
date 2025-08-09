@@ -1,0 +1,58 @@
+[package]
+name = "replicante"
+version = "0.1.0"
+edition = "2021"
+authors = ["Replicante Project"]
+description = "Autonomous AI Agent"
+license = "MIT"
+
+[dependencies]
+# Core async runtime
+tokio = { version = "1.41", features = ["full"] }
+
+# HTTP client for LLM APIs
+reqwest = { version = "0.11", default-features = false, features = ["rustls-tls", "json"] }
+
+# Database (bundled for static linking)
+rusqlite = { version = "0.30", features = ["bundled"] }
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+toml = "0.8"
+
+# Configuration
+config = "0.13"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+
+# Error handling
+anyhow = "1.0"
+thiserror = "1.0"
+
+# Environment variables
+dotenvy = "0.15"
+
+# UUID for unique IDs
+uuid = { version = "1.11", features = ["v4", "serde"] }
+
+# Time handling
+chrono = { version = "0.4", features = ["serde"] }
+
+# Async traits
+async-trait = "0.1"
+
+# JSON manipulation
+json = "0.12"
+
+[dev-dependencies]
+tempfile = "3.8"
+
+[profile.release]
+opt-level = "z"     # Optimize for size
+lto = true          # Link-time optimization
+codegen-units = 1   # Single codegen unit
+strip = true        # Strip symbols
+panic = "abort"     # Smaller panic handler
