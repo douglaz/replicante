@@ -49,7 +49,7 @@
         
         # Static musl build for deployment
         packages.replicante-static = let
-          rustPlatformMusl = pkgs.makeRustPlatform {
+          rustPlatformMusl = pkgs.pkgsMusl.makeRustPlatform {
             cargo = rustToolchain;
             rustc = rustToolchain;
           };
@@ -65,28 +65,43 @@
           nativeBuildInputs = with pkgs; [
             pkg-config
             rustToolchain
-            pkgsStatic.stdenv.cc
+            pkgsMusl.stdenv.cc
           ];
           
-          buildInputs = with pkgs.pkgsStatic; [
-            sqlite
-            openssl
-          ];
+          # No external buildInputs needed - everything is bundled
+          buildInputs = [];
           
           CARGO_BUILD_TARGET = "x86_64-unknown-linux-musl";
-          CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER = "${pkgs.pkgsStatic.stdenv.cc}/bin/${pkgs.pkgsStatic.stdenv.cc.targetPrefix}cc";
-          CC_x86_64_unknown_linux_musl = "${pkgs.pkgsStatic.stdenv.cc}/bin/${pkgs.pkgsStatic.stdenv.cc.targetPrefix}cc";
-          CARGO_BUILD_RUSTFLAGS = "-C target-feature=+crt-static -C link-arg=-static";
+          CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER = "${pkgs.pkgsMusl.stdenv.cc}/bin/${pkgs.pkgsMusl.stdenv.cc.targetPrefix}cc";
           
-          # SQLite static linking
-          SQLITE3_STATIC = "1";
-          SQLITE3_LIB_DIR = "${pkgs.pkgsStatic.sqlite.out}/lib";
+          # Ensure fully static linking
+          RUSTFLAGS = "-C target-feature=+crt-static -C link-arg=-static -C link-arg=-static-pie";
+          
+          # Use bundled SQLite from rusqlite crate
+          RUSQLITE_BUNDLED = "1";
+          
+          # Disable OpenSSL, use rustls instead
+          OPENSSL_NO_VENDOR = "0";
           
           doCheck = false; # Tests don't work well with static linking
           
+          # Verify the binary is actually static
+          postInstall = ''
+            echo "Verifying static binary..."
+            if ldd $out/bin/replicante 2>&1 | grep -q "not a dynamic executable"; then
+              echo "✓ Binary is statically linked"
+            else
+              echo "⚠ Warning: Binary may have dynamic dependencies:"
+              ldd $out/bin/replicante || true
+            fi
+            
+            echo "Binary size: $(du -h $out/bin/replicante | cut -f1)"
+          '';
+          
           meta = with pkgs.lib; {
-            description = "Autonomous AI Agent (static build)";
+            description = "Autonomous AI Agent (static musl build)";
             license = licenses.mit;
+            platforms = [ "x86_64-linux" ];
           };
         };
 

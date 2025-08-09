@@ -33,3 +33,15 @@ jobs:
     
     - name: Build static binary with Nix
       run: nix build .#replicante-static
+    
+    - name: Verify static linking
+      run: |
+        echo "Checking if binary is statically linked..."
+        if ldd result/bin/replicante 2>&1 | grep -q "not a dynamic executable"; then
+          echo "✅ Binary is statically linked"
+        else
+          echo "❌ Binary has dynamic dependencies:"
+          ldd result/bin/replicante
+          exit 1
+        fi
+        echo "Binary size: $(du -h result/bin/replicante | cut -f1)"
