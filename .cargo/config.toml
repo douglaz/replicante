@@ -1,18 +1,1 @@
-[target.x86_64-unknown-linux-musl]
-rustflags = [
-    "-C", "target-feature=+crt-static",
-    "-C", "link-arg=-static",
-    "-C", "link-arg=-static-pie",
-]
-
-[build]
-# Use musl target for release builds
-# Uncomment to make musl the default target
-# target = "x86_64-unknown-linux-musl"
-
-[env]
-# Use bundled SQLite
-RUSQLITE_BUNDLED = "1"
-
-# Disable OpenSSL (use rustls instead)
-OPENSSL_NO_VENDOR = "0"
+# Don't set default target - let CI/build scripts specify it explicitly

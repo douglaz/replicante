@@ -45,18 +45,8 @@ jobs:
     - name: Build
       run: nix develop -c cargo build --verbose --release
     
-    # TODO: Re-enable once we fix the Nix static build performance
-    # - name: Build static binary with Nix
-    #   run: nix build .#replicante-static
-    
-    # - name: Verify static linking
-    #   run: |
-    #     echo "Checking if binary is statically linked..."
-    #     if ldd result/bin/replicante 2>&1 | grep -q "not a dynamic executable"; then
-    #       echo "✅ Binary is statically linked"
-    #     else
-    #       echo "❌ Binary has dynamic dependencies:"
-    #       ldd result/bin/replicante
-    #       exit 1
-    #     fi
-    #     echo "Binary size: $(du -h result/bin/replicante | cut -f1)"
+    - name: Show binary info
+      run: |
+        echo "Binary built successfully!"
+        echo "Binary size: $(du -h target/release/replicante | cut -f1)"
+        file target/release/replicante
