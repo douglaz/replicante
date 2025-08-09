@@ -1,4 +1,4 @@
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::process::Stdio;
@@ -51,106 +51,98 @@ impl MCPClient {
         // Initialize with some mock tools for testing
         if !servers.is_empty() {
             // Mock Nostr tools
-            if servers.iter().any(|s| s.name.contains("nostr")) {
-                if let Some(server) = servers.iter_mut().find(|s| s.name.contains("nostr")) {
-                    server.tools.push(Tool {
-                        name: "nostr_publish".to_string(),
-                        description: Some("Publish a message to Nostr".to_string()),
-                        parameters: Some(serde_json::json!({
-                            "type": "object",
-                            "properties": {
-                                "content": { "type": "string" },
-                                "tags": { "type": "array" }
-                            }
-                        })),
-                    });
-                    server.tools.push(Tool {
-                        name: "nostr_subscribe".to_string(),
-                        description: Some("Subscribe to Nostr events".to_string()),
-                        parameters: Some(serde_json::json!({
-                            "type": "object",
-                            "properties": {
-                                "filters": { "type": "array" }
-                            }
-                        })),
-                    });
-                }
+            if let Some(server) = servers.iter_mut().find(|s| s.name.contains("nostr")) {
+                server.tools.push(Tool {
+                    name: "nostr_publish".to_string(),
+                    description: Some("Publish a message to Nostr".to_string()),
+                    parameters: Some(serde_json::json!({
+                        "type": "object",
+                        "properties": {
+                            "content": { "type": "string" },
+                            "tags": { "type": "array" }
+                        }
+                    })),
+                });
+                server.tools.push(Tool {
+                    name: "nostr_subscribe".to_string(),
+                    description: Some("Subscribe to Nostr events".to_string()),
+                    parameters: Some(serde_json::json!({
+                        "type": "object",
+                        "properties": {
+                            "filters": { "type": "array" }
+                        }
+                    })),
+                });
             }
 
             // Mock filesystem tools
-            if servers.iter().any(|s| s.name.contains("filesystem")) {
-                if let Some(server) = servers.iter_mut().find(|s| s.name.contains("filesystem")) {
-                    server.tools.push(Tool {
-                        name: "fs_read".to_string(),
-                        description: Some("Read a file".to_string()),
-                        parameters: Some(serde_json::json!({
-                            "type": "object",
-                            "properties": {
-                                "path": { "type": "string" }
-                            }
-                        })),
-                    });
-                    server.tools.push(Tool {
-                        name: "fs_write".to_string(),
-                        description: Some("Write to a file".to_string()),
-                        parameters: Some(serde_json::json!({
-                            "type": "object",
-                            "properties": {
-                                "path": { "type": "string" },
-                                "content": { "type": "string" }
-                            }
-                        })),
-                    });
-                }
+            if let Some(server) = servers.iter_mut().find(|s| s.name.contains("filesystem")) {
+                server.tools.push(Tool {
+                    name: "fs_read".to_string(),
+                    description: Some("Read a file".to_string()),
+                    parameters: Some(serde_json::json!({
+                        "type": "object",
+                        "properties": {
+                            "path": { "type": "string" }
+                        }
+                    })),
+                });
+                server.tools.push(Tool {
+                    name: "fs_write".to_string(),
+                    description: Some("Write to a file".to_string()),
+                    parameters: Some(serde_json::json!({
+                        "type": "object",
+                        "properties": {
+                            "path": { "type": "string" },
+                            "content": { "type": "string" }
+                        }
+                    })),
+                });
             }
 
             // Mock HTTP tools
-            if servers.iter().any(|s| s.name.contains("http")) {
-                if let Some(server) = servers.iter_mut().find(|s| s.name.contains("http")) {
-                    server.tools.push(Tool {
-                        name: "http_get".to_string(),
-                        description: Some("Make an HTTP GET request".to_string()),
-                        parameters: Some(serde_json::json!({
-                            "type": "object",
-                            "properties": {
-                                "url": { "type": "string" }
-                            }
-                        })),
-                    });
-                    server.tools.push(Tool {
-                        name: "http_post".to_string(),
-                        description: Some("Make an HTTP POST request".to_string()),
-                        parameters: Some(serde_json::json!({
-                            "type": "object",
-                            "properties": {
-                                "url": { "type": "string" },
-                                "body": { "type": "object" }
-                            }
-                        })),
-                    });
-                }
+            if let Some(server) = servers.iter_mut().find(|s| s.name.contains("http")) {
+                server.tools.push(Tool {
+                    name: "http_get".to_string(),
+                    description: Some("Make an HTTP GET request".to_string()),
+                    parameters: Some(serde_json::json!({
+                        "type": "object",
+                        "properties": {
+                            "url": { "type": "string" }
+                        }
+                    })),
+                });
+                server.tools.push(Tool {
+                    name: "http_post".to_string(),
+                    description: Some("Make an HTTP POST request".to_string()),
+                    parameters: Some(serde_json::json!({
+                        "type": "object",
+                        "properties": {
+                            "url": { "type": "string" },
+                            "body": { "type": "object" }
+                        }
+                    })),
+                });
             }
 
             // Mock Bitcoin/Lightning tools
-            if servers.iter().any(|s| s.name.contains("bitcoin")) {
-                if let Some(server) = servers.iter_mut().find(|s| s.name.contains("bitcoin")) {
-                    server.tools.push(Tool {
-                        name: "lightning_invoice".to_string(),
-                        description: Some("Create a Lightning invoice".to_string()),
-                        parameters: Some(serde_json::json!({
-                            "type": "object",
-                            "properties": {
-                                "amount_sats": { "type": "number" },
-                                "description": { "type": "string" }
-                            }
-                        })),
-                    });
-                    server.tools.push(Tool {
-                        name: "check_balance".to_string(),
-                        description: Some("Check wallet balance".to_string()),
-                        parameters: None,
-                    });
-                }
+            if let Some(server) = servers.iter_mut().find(|s| s.name.contains("bitcoin")) {
+                server.tools.push(Tool {
+                    name: "lightning_invoice".to_string(),
+                    description: Some("Create a Lightning invoice".to_string()),
+                    parameters: Some(serde_json::json!({
+                        "type": "object",
+                        "properties": {
+                            "amount_sats": { "type": "number" },
+                            "description": { "type": "string" }
+                        }
+                    })),
+                });
+                server.tools.push(Tool {
+                    name: "check_balance".to_string(),
+                    description: Some("Check wallet balance".to_string()),
+                    parameters: None,
+                });
             }
         }
 

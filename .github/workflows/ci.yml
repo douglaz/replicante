@@ -42,21 +42,21 @@ jobs:
     - name: Run tests
       run: nix develop -c cargo test --verbose
     
-    - name: Build
-      run: nix develop -c cargo build --verbose --release
+    - name: Build musl binary
+      run: |
+        echo "Building musl target..."
+        nix develop -c cargo build --release --target x86_64-unknown-linux-musl
     
-    # TODO: Re-enable once we fix the Nix static build performance
-    # - name: Build static binary with Nix
-    #   run: nix build .#replicante-static
-    
-    # - name: Verify static linking
-    #   run: |
-    #     echo "Checking if binary is statically linked..."
-    #     if ldd result/bin/replicante 2>&1 | grep -q "not a dynamic executable"; then
-    #       echo "✅ Binary is statically linked"
-    #     else
-    #       echo "❌ Binary has dynamic dependencies:"
-    #       ldd result/bin/replicante
-    #       exit 1
-    #     fi
-    #     echo "Binary size: $(du -h result/bin/replicante | cut -f1)"
+    - name: Verify musl binary
+      run: |
+        echo "=== Musl binary info ==="
+        echo "Binary size: $(du -h target/x86_64-unknown-linux-musl/release/replicante | cut -f1)"
+        file target/x86_64-unknown-linux-musl/release/replicante
+        echo ""
+        echo "Checking for dynamic dependencies:"
+        if ldd target/x86_64-unknown-linux-musl/release/replicante 2>&1 | grep -q "not a dynamic executable"; then
+          echo "✅ Binary is statically linked (no dynamic dependencies)"
+        else
+          echo "Binary dependencies:"
+          ldd target/x86_64-unknown-linux-musl/release/replicante || true
+        fi

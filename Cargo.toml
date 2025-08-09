@@ -1,7 +1,7 @@
 [package]
 name = "replicante"
 version = "0.1.0"
-edition = "2021"
+edition = "2024"
 authors = ["Replicante Project"]
 description = "Autonomous AI Agent"
 license = "MIT"
@@ -13,8 +13,8 @@ tokio = { version = "1.41", features = ["full"] }
 # HTTP client for LLM APIs
 reqwest = { version = "0.11", default-features = false, features = ["rustls-tls", "json"] }
 
-# Database (bundled for static linking)
-rusqlite = { version = "0.30", features = ["bundled"] }
+# Database
+rusqlite = { version = "0.30", features = [] }
 
 # Serialization
 serde = { version = "1.0", features = ["derive"] }
