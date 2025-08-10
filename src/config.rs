@@ -23,10 +23,22 @@ pub struct AgentConfig {
 
 impl Config {
     pub fn load() -> Result<Self> {
-        // Try to load from file first
-        let config_path = "config.toml";
-        if Path::new(config_path).exists() {
-            let contents = fs::read_to_string(config_path)?;
+        // Check for config path from environment variable or command line
+        let config_path = std::env::var("CONFIG_FILE")
+            .unwrap_or_else(|_| {
+                // Check command line arguments
+                let args: Vec<String> = std::env::args().collect();
+                if let Some(config_idx) = args.iter().position(|arg| arg == "--config") {
+                    if config_idx + 1 < args.len() {
+                        return args[config_idx + 1].clone();
+                    }
+                }
+                "config.toml".to_string()
+            });
+        
+        // Try to load from file
+        if Path::new(&config_path).exists() {
+            let contents = fs::read_to_string(&config_path)?;
             let config: Config = toml::from_str(&contents)?;
             return Ok(config);
         }
