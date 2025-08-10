@@ -75,11 +75,14 @@ impl Replicante {
 
         // Generate unique agent ID
         let id = format!("replicante-{}", Uuid::new_v4());
-        info!("Agent ID: {}", id);
+        info!("Agent ID: {id}");
 
         // Initialize LLM provider
         let llm = llm::create_provider(&config.llm)?;
-        info!("LLM provider initialized: {}", config.llm.provider);
+        info!(
+            "LLM provider initialized: {provider}",
+            provider = config.llm.provider
+        );
 
         // Initialize MCP client
         let mcp = MCPClient::new(&config.mcp_servers).await?;
@@ -109,7 +112,7 @@ impl Replicante {
         state
             .remember("initial_goals", serde_json::json!(goals.clone()))
             .await?;
-        info!("Agent goals: {}", goals);
+        info!("Agent goals: {goals}");
 
         Ok(Self {
             id,
@@ -193,7 +196,7 @@ Example response:
         let response = self.llm.complete(&prompt).await?;
 
         // Log the raw LLM response for debugging
-        info!("LLM response: {}", response);
+        info!("LLM response: {response}");
 
         // Clean the response - remove comments
         let cleaned_response = response
@@ -209,9 +212,9 @@ Example response:
             .join("\n");
 
         // Parse LLM response
-        let thought_json: serde_json::Value =
-            serde_json::from_str(&cleaned_response).unwrap_or_else(|e| {
-                warn!("Failed to parse JSON from LLM: {}", e);
+        let thought_json: serde_json::Value = serde_json::from_str(&cleaned_response)
+            .unwrap_or_else(|e| {
+                warn!("Failed to parse JSON from LLM: {e}");
                 serde_json::json!({
                     "reasoning": response,
                     "confidence": 0.5,
@@ -253,9 +256,7 @@ Example response:
         // Parse first proposed action
         let first_action = &thought.proposed_actions[0];
 
-        if first_action.starts_with("use_tool:") {
-            let tool_part = &first_action[9..]; // Skip "use_tool:"
-            
+        if let Some(tool_part) = first_action.strip_prefix("use_tool:") {
             // Handle tool names like "http:get_time"
             // For now, pass simple default parameters
             let params = if tool_part.contains("get_time") {
@@ -269,7 +270,7 @@ Example response:
             } else {
                 serde_json::json!({})
             };
-            
+
             return Ok(Action::UseTool {
                 name: tool_part.to_string(),
                 params,
@@ -308,25 +309,25 @@ Example response:
         match action {
             Action::UseTool { name, params } => match self.mcp.use_tool(&name, params).await {
                 Ok(result) => {
-                    info!("Tool {} executed successfully", name);
+                    info!("Tool {name} executed successfully");
                     self.state
                         .remember(&format!("tool_result_{}", Utc::now().timestamp()), result)
                         .await?;
                 }
                 Err(e) => {
-                    warn!("Tool execution failed: {}", e);
+                    warn!("Tool execution failed: {e}");
                 }
             },
             Action::Think { about } => {
-                info!("Deep thinking about: {}", about);
+                info!("Deep thinking about: {about}");
                 // Could trigger more complex reasoning here
             }
             Action::Remember { key, value } => {
-                info!("Remembering: {} = {:?}", key, value);
+                info!("Remembering: {key} = {value:?}");
                 self.state.remember(&key, value).await?;
             }
             Action::Wait { duration } => {
-                info!("Waiting for {:?}", duration);
+                info!("Waiting for {duration:?}");
                 tokio::time::sleep(duration).await;
             }
             Action::Explore => {
@@ -347,7 +348,10 @@ Example response:
         let recent = self.state.get_recent_decisions(5).await?;
 
         if !recent.is_empty() {
-            info!("Learning from {} recent decisions", recent.len());
+            info!(
+                "Learning from {count} recent decisions",
+                count = recent.len()
+            );
             // Could implement learning algorithms here
         }
 
@@ -363,7 +367,7 @@ Example response:
                     // Success, continue
                 }
                 Err(e) => {
-                    error!("Error in reasoning cycle: {}", e);
+                    error!("Error in reasoning cycle: {e}");
                     // Log error but continue running
                     self.state
                         .remember(

@@ -24,18 +24,17 @@ pub struct AgentConfig {
 impl Config {
     pub fn load() -> Result<Self> {
         // Check for config path from environment variable or command line
-        let config_path = std::env::var("CONFIG_FILE")
-            .unwrap_or_else(|_| {
-                // Check command line arguments
-                let args: Vec<String> = std::env::args().collect();
-                if let Some(config_idx) = args.iter().position(|arg| arg == "--config") {
-                    if config_idx + 1 < args.len() {
-                        return args[config_idx + 1].clone();
-                    }
-                }
-                "config.toml".to_string()
-            });
-        
+        let config_path = std::env::var("CONFIG_FILE").unwrap_or_else(|_| {
+            // Check command line arguments
+            let args: Vec<String> = std::env::args().collect();
+            if let Some(config_idx) = args.iter().position(|arg| arg == "--config")
+                && config_idx + 1 < args.len()
+            {
+                return args[config_idx + 1].clone();
+            }
+            "config.toml".to_string()
+        });
+
         // Try to load from file
         if Path::new(&config_path).exists() {
             let contents = fs::read_to_string(&config_path)?;
@@ -46,8 +45,10 @@ impl Config {
         // Fall back to default configuration
         Ok(Self::default())
     }
+}
 
-    pub fn default() -> Self {
+impl Default for Config {
+    fn default() -> Self {
         Self {
             agent: AgentConfig {
                 id: Some("replicante-001".to_string()),

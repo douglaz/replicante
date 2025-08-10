@@ -1,4 +1,4 @@
-use anyhow::{Result, bail, Context};
+use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
@@ -7,13 +7,13 @@ use std::sync::Arc;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, Command};
 use tokio::sync::{Mutex, oneshot};
-use tokio::time::{timeout, Duration};
-use tracing::{debug, info, warn, error};
+use tokio::time::{Duration, timeout};
+use tracing::{debug, error, info, warn};
 
-use crate::jsonrpc::{Request, Response, Message, RequestId};
+use crate::jsonrpc::{Message, Request, RequestId, Response};
 use crate::mcp_protocol::{
-    InitializeParams, InitializeResult, ToolInfo, ToolsListResult,
-    ToolCallParams, ToolCallResult, ContentItem,
+    ContentItem, InitializeParams, InitializeResult, ToolCallParams, ToolCallResult, ToolInfo,
+    ToolsListResult,
 };
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -50,7 +50,7 @@ impl MCPClient {
         let mut servers = Vec::new();
 
         for config in configs {
-            info!("Initializing MCP server: {}", config.name);
+            info!("Initializing MCP server: {name}", name = config.name);
 
             let server = Arc::new(Mutex::new(MCPServer {
                 name: config.name.clone(),
@@ -64,7 +64,7 @@ impl MCPClient {
 
             // Start the server process
             if let Err(e) = Self::start_server(server.clone()).await {
-                error!("Failed to start MCP server {}: {}", config.name, e);
+                error!("Failed to start MCP server {name}: {e}", name = config.name);
                 // Continue with other servers even if one fails
             }
 
@@ -78,7 +78,11 @@ impl MCPClient {
         let mut server_guard = server.lock().await;
         let config = server_guard.config.clone();
 
-        info!("Starting MCP server process: {} {}", config.command, config.args.join(" "));
+        info!(
+            "Starting MCP server process: {} {}",
+            config.command,
+            config.args.join(" ")
+        );
 
         // Spawn the MCP server process
         let mut cmd = Command::new(&config.command);
@@ -88,20 +92,30 @@ impl MCPClient {
             .stderr(Stdio::piped())
             .kill_on_drop(true);
 
-        let mut child = cmd.spawn()
-            .with_context(|| format!("Failed to spawn MCP server: {}", config.command))?;
+        let mut child = cmd.spawn().with_context(|| {
+            format!(
+                "Failed to spawn MCP server: {command}",
+                command = config.command
+            )
+        })?;
 
         // Get handles to stdin/stdout
-        let stdin = child.stdin.take()
+        let stdin = child
+            .stdin
+            .take()
             .ok_or_else(|| anyhow::anyhow!("Failed to get stdin handle"))?;
-        let stdout = child.stdout.take()
+        let stdout = child
+            .stdout
+            .take()
             .ok_or_else(|| anyhow::anyhow!("Failed to get stdout handle"))?;
-        let stderr = child.stderr.take()
+        let stderr = child
+            .stderr
+            .take()
             .ok_or_else(|| anyhow::anyhow!("Failed to get stderr handle"))?;
 
         server_guard.process = Some(child);
         let server_name = server_guard.name.clone();
-        
+
         // Store stdin writer in the server struct first
         let stdin = Arc::new(Mutex::new(stdin));
         server_guard.stdin = Some(stdin.clone());
@@ -113,27 +127,27 @@ impl MCPClient {
         tokio::spawn(async move {
             let reader = BufReader::new(stdout);
             let mut lines = reader.lines();
-            
+
             while let Ok(Some(line)) = lines.next_line().await {
                 if line.trim().is_empty() {
                     continue;
                 }
-                
-                debug!("Received from {}: {}", server_name_stdout, line);
-                
+
+                debug!("Received from {server_name_stdout}: {line}");
+
                 match Message::parse(&line) {
                     Ok(msg) => {
                         if let Err(e) = Self::handle_message(server_clone.clone(), msg).await {
-                            error!("Failed to handle message: {}", e);
+                            error!("Failed to handle message: {e}");
                         }
                     }
                     Err(e) => {
-                        error!("Failed to parse JSON-RPC message: {}", e);
+                        error!("Failed to parse JSON-RPC message: {e}");
                     }
                 }
             }
-            
-            warn!("MCP server {} stdout closed", server_name_stdout);
+
+            warn!("MCP server {server_name_stdout} stdout closed");
         });
 
         // Spawn task to handle stderr (logging)
@@ -141,15 +155,15 @@ impl MCPClient {
         tokio::spawn(async move {
             let reader = BufReader::new(stderr);
             let mut lines = reader.lines();
-            
+
             while let Ok(Some(line)) = lines.next_line().await {
-                debug!("[{}] {}", server_name_stderr, line);
+                debug!("[{server_name_stderr}] {line}");
             }
         });
 
         // Wait a bit for the handlers to be ready
         tokio::time::sleep(Duration::from_millis(100)).await;
-        
+
         // Initialize the MCP connection
         Self::initialize_connection(server.clone(), stdin).await?;
 
@@ -169,29 +183,37 @@ impl MCPClient {
             "replicante".to_string(),
             env!("CARGO_PKG_VERSION").to_string(),
         );
-        
+
         let request = Request::new("initialize", Some(serde_json::to_value(init_params)?));
         let response = Self::send_request(server.clone(), stdin.clone(), request).await?;
 
         // Parse initialize response
         if let Some(result) = response.result {
             let init_result: InitializeResult = serde_json::from_value(result)?;
-            info!("Connected to MCP server {}: {} v{}", 
-                server_name, init_result.server_info.name, init_result.server_info.version);
-            
+            info!(
+                "Connected to MCP server {server_name}: {name} v{version}",
+                server_name = server_name,
+                name = init_result.server_info.name,
+                version = init_result.server_info.version
+            );
+
             // Send initialized notification
             let notification = Request::notification("initialized", Some(serde_json::json!({})));
             Self::send_notification(stdin.clone(), notification).await?;
-            
+
             // Mark server as initialized
             let mut server_guard = server.lock().await;
             server_guard.initialized = true;
             drop(server_guard);
-            
+
             // Discover available tools
             Self::discover_server_tools(server.clone(), stdin.clone()).await?;
         } else if let Some(error) = response.error {
-            bail!("Initialize failed: {} (code: {})", error.message, error.code);
+            bail!(
+                "Initialize failed: {message} (code: {code})",
+                message = error.message,
+                code = error.code
+            );
         }
 
         Ok(())
@@ -208,12 +230,19 @@ impl MCPClient {
             let tools_result: ToolsListResult = serde_json::from_value(result)?;
             let mut server_guard = server.lock().await;
             server_guard.tools = tools_result.tools;
-            
-            info!("Discovered {} tools from {}", 
-                server_guard.tools.len(), server_guard.name);
-            
+
+            info!(
+                "Discovered {count} tools from {name}",
+                count = server_guard.tools.len(),
+                name = server_guard.name
+            );
+
             for tool in &server_guard.tools {
-                debug!("  - {}: {}", tool.name, tool.description.as_ref().unwrap_or(&"".to_string()));
+                debug!(
+                    "  - {name}: {description}",
+                    name = tool.name,
+                    description = tool.description.as_ref().unwrap_or(&"".to_string())
+                );
             }
         }
 
@@ -225,30 +254,32 @@ impl MCPClient {
         stdin: Arc<Mutex<tokio::process::ChildStdin>>,
         request: Request,
     ) -> Result<Response> {
-        let request_id = request.id.clone()
+        let request_id = request
+            .id
+            .clone()
             .ok_or_else(|| anyhow::anyhow!("Request must have an ID"))?;
-        
+
         // Create oneshot channel for response
         let (tx, rx) = oneshot::channel();
-        
+
         // Store pending request
         {
             let mut server_guard = server.lock().await;
             server_guard.pending_requests.insert(request_id.clone(), tx);
         }
-        
+
         // Send request
         let message = Message::Request(request);
         let json = message.to_string()? + "\n";
-        
+
         {
             let mut stdin_guard = stdin.lock().await;
             stdin_guard.write_all(json.as_bytes()).await?;
             stdin_guard.flush().await?;
         }
-        
-        debug!("Sent request: {}", json.trim());
-        
+
+        debug!("Sent request: {request}", request = json.trim());
+
         // Wait for response with timeout
         match timeout(Duration::from_secs(30), rx).await {
             Ok(Ok(response)) => Ok(response),
@@ -268,12 +299,15 @@ impl MCPClient {
     ) -> Result<()> {
         let message = Message::Notification(notification);
         let json = message.to_string()? + "\n";
-        
+
         let mut stdin_guard = stdin.lock().await;
         stdin_guard.write_all(json.as_bytes()).await?;
         stdin_guard.flush().await?;
-        
-        debug!("Sent notification: {}", json.trim());
+
+        debug!(
+            "Sent notification: {notification}",
+            notification = json.trim()
+        );
         Ok(())
     }
 
@@ -299,6 +333,7 @@ impl MCPClient {
         Ok(())
     }
 
+    #[allow(dead_code)]
     pub fn server_count(&self) -> usize {
         self.servers.len()
     }
@@ -309,7 +344,11 @@ impl MCPClient {
         for server in &self.servers {
             let server_guard = server.lock().await;
             for tool in &server_guard.tools {
-                all_tools.push(format!("{}:{}", server_guard.name, tool.name));
+                all_tools.push(format!(
+                    "{server}:{tool}",
+                    server = server_guard.name,
+                    tool = tool.name
+                ));
             }
         }
 
@@ -323,7 +362,11 @@ impl MCPClient {
             let server_guard = server.lock().await;
             for tool_info in &server_guard.tools {
                 all_tools.push(Tool {
-                    name: format!("{}:{}", server_guard.name, tool_info.name),
+                    name: format!(
+                        "{server}:{tool}",
+                        server = server_guard.name,
+                        tool = tool_info.name
+                    ),
                     description: tool_info.description.clone(),
                     parameters: tool_info.input_schema.clone(),
                 });
@@ -334,7 +377,7 @@ impl MCPClient {
     }
 
     pub async fn use_tool(&self, name: &str, params: Value) -> Result<Value> {
-        debug!("Using tool: {} with params: {:?}", name, params);
+        debug!("Using tool: {name} with params: {params:?}");
 
         // Parse server:tool format
         let parts: Vec<&str> = name.split(':').collect();
@@ -346,7 +389,9 @@ impl MCPClient {
         let tool_name = parts[1];
 
         // Find the server
-        let server = self.servers.iter()
+        let server = self
+            .servers
+            .iter()
             .find(|s| {
                 let server_guard = futures::executor::block_on(s.lock());
                 server_guard.name == server_name
@@ -359,7 +404,9 @@ impl MCPClient {
             if !server_guard.initialized {
                 bail!("Server {} is not initialized", server_name);
             }
-            server_guard.stdin.clone()
+            server_guard
+                .stdin
+                .clone()
                 .ok_or_else(|| anyhow::anyhow!("No stdin handle for server {}", server_name))?
         };
 
@@ -371,30 +418,34 @@ impl MCPClient {
 
         let request = Request::new("tools/call", Some(serde_json::to_value(tool_params)?));
         let response = Self::send_request(server.clone(), stdin, request).await?;
-        
+
         // Parse tool execution response
         if let Some(result) = response.result {
             let tool_result: ToolCallResult = serde_json::from_value(result)?;
-            
+
             // Convert tool result to simplified format
-            if let Some(content) = tool_result.content {
-                if !content.is_empty() {
-                    // Extract text content from the first item
-                    if let Some(ContentItem::Text { text }) = content.into_iter().next() {
-                        return Ok(serde_json::json!({
-                            "success": !tool_result.is_error.unwrap_or(false),
-                            "content": text
-                        }));
-                    }
+            if let Some(content) = tool_result.content
+                && !content.is_empty()
+            {
+                // Extract text content from the first item
+                if let Some(ContentItem::Text { text }) = content.into_iter().next() {
+                    return Ok(serde_json::json!({
+                        "success": !tool_result.is_error.unwrap_or(false),
+                        "content": text
+                    }));
                 }
             }
-            
+
             Ok(serde_json::json!({
                 "success": !tool_result.is_error.unwrap_or(false),
-                "message": format!("Tool {} executed", tool_name)
+                "message": format!("Tool {tool_name} executed")
             }))
         } else if let Some(error) = response.error {
-            bail!("Tool execution failed: {} (code: {})", error.message, error.code)
+            bail!(
+                "Tool execution failed: {message} (code: {code})",
+                message = error.message,
+                code = error.code
+            )
         } else {
             bail!("Invalid tool execution response")
         }
@@ -402,13 +453,13 @@ impl MCPClient {
 
     async fn cleanup_server(server: Arc<Mutex<MCPServer>>) {
         let mut server_guard = server.lock().await;
-        
+
         if let Some(mut process) = server_guard.process.take() {
-            info!("Shutting down MCP server: {}", server_guard.name);
-            
+            info!("Shutting down MCP server: {name}", name = server_guard.name);
+
             // Try graceful shutdown first
             if let Err(e) = process.kill().await {
-                error!("Failed to kill MCP server process: {}", e);
+                error!("Failed to kill MCP server process: {e}");
             }
         }
     }
@@ -423,7 +474,8 @@ impl Drop for MCPClient {
             let _ = std::thread::spawn(move || {
                 let rt = tokio::runtime::Runtime::new().unwrap();
                 rt.block_on(MCPClient::cleanup_server(server_clone));
-            }).join();
+            })
+            .join();
         }
     }
 }
@@ -431,7 +483,7 @@ impl Drop for MCPClient {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::jsonrpc::{Request, Message};
+    use crate::jsonrpc::{Message, Request};
 
     #[test]
     fn test_json_rpc_request_creation() {
@@ -445,7 +497,7 @@ mod tests {
     fn test_json_rpc_message_parsing() {
         let json = r#"{"jsonrpc":"2.0","id":1,"result":{"test":"value"}}"#;
         let message = Message::parse(json).unwrap();
-        
+
         match message {
             Message::Response(response) => {
                 assert_eq!(response.jsonrpc, "2.0");
@@ -490,12 +542,12 @@ mod tests {
         // Should not panic, just log error
         let client = MCPClient::new(&configs).await?;
         assert_eq!(client.servers.len(), 1);
-        
+
         // Server should not be initialized
         let server = &client.servers[0];
         let server_guard = server.lock().await;
         assert!(!server_guard.initialized);
-        
+
         Ok(())
     }
 
@@ -514,7 +566,7 @@ mod tests {
             name: "test_tool".to_string(),
             arguments: Some(serde_json::json!({"arg": "value"})),
         };
-        
+
         let json = serde_json::to_value(params).unwrap();
         assert_eq!(json["name"], "test_tool");
         assert_eq!(json["arguments"]["arg"], "value");
@@ -525,7 +577,7 @@ mod tests {
         let item = ContentItem::Text {
             text: "Hello, world!".to_string(),
         };
-        
+
         let json = serde_json::to_value(&item).unwrap();
         assert_eq!(json["type"], "text");
         assert_eq!(json["text"], "Hello, world!");
