@@ -1,0 +1,86 @@
+version: '3.8'
+
+services:
+  # Simple test setup with supervisor and agent accessing host's Ollama
+  
+  supervisor:
+    build:
+      context: .
+      dockerfile: Dockerfile.supervisor
+    container_name: replicante-supervisor-test
+    command: ["supervisor", "start", "--config", "/config/supervisor-test.toml"]
+    ports:
+      - "8081:8080"  # Web dashboard
+    volumes:
+      - ./config:/config:ro
+      - supervisor-test-data:/data
+      - ./logs:/logs
+    networks:
+      - replicante-test-net
+    restart: unless-stopped
+    environment:
+      - RUST_LOG=info
+    
+  # Agent with access to host's Ollama
+  agent:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: replicante-agent-test
+    command: ["agent", "--config", "/config/agent.toml"]
+    depends_on:
+      - supervisor
+    volumes:
+      - ./config:/config:ro
+      - agent-test-data:/data
+      - sandbox-test:/sandbox
+    # Use host network to access Ollama
+    network_mode: "host"
+    environment:
+      - RUST_LOG=info
+      - SUPERVISOR_URL=http://localhost:8081
+    restart: unless-stopped
+    # Moderate security - allow Ollama access but maintain other restrictions
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_BIND_SERVICE
+    # Resource limits
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 512M
+
+  # Optional: Proxy for monitoring (not enforcing)
+  proxy:
+    image: ubuntu/squid:latest
+    container_name: replicante-proxy-test
+    volumes:
+      - ./proxy/squid.conf:/etc/squid/squid.conf:ro
+      - ./proxy/whitelist.txt:/etc/squid/whitelist.txt:ro
+    networks:
+      - replicante-test-net
+    ports:
+      - "3128:3128"  # Proxy port for debugging
+    restart: unless-stopped
+    # Map host.docker.internal for proxy as well
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+networks:
+  replicante-test-net:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.22.0.0/16
+
+volumes:
+  supervisor-test-data:
+    driver: local
+  agent-test-data:
+    driver: local
+  sandbox-test:
+    driver: local
