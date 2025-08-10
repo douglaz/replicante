@@ -185,11 +185,8 @@ impl StateManager {
                     let created_at = row.get::<_, String>(3)?;
 
                     Ok(format!(
-                        "[{}] Thought: {} | Action: {} | Result: {}",
-                        created_at,
-                        thought,
-                        action,
-                        result.unwrap_or_else(|| "pending".to_string())
+                        "[{created_at}] Thought: {thought} | Action: {action} | Result: {result}",
+                        result = result.unwrap_or_else(|| "pending".to_string())
                     ))
                 })?;
 
