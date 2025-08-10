@@ -5,8 +5,10 @@ use tracing::{error, info, warn};
 use uuid::Uuid;
 
 mod config;
+mod jsonrpc;
 mod llm;
 mod mcp;
+mod mcp_protocol;
 mod state;
 
 use config::Config;
@@ -163,7 +165,23 @@ Consider:
 4. What actions would best serve your purpose?
 
 Respond with your reasoning, confidence level (0-1), and proposed actions.
-Format your response as JSON with keys: reasoning, confidence, proposed_actions"#,
+Format your response as JSON with keys: reasoning, confidence, proposed_actions
+
+For proposed_actions, use these formats:
+- "use_tool:http:get_time" - to use the get_time tool
+- "use_tool:http:check_weather" - to check weather
+- "use_tool:http:calculate" - to calculate
+- "use_tool:http:fetch_url" - to fetch URL
+- "explore" - to explore capabilities
+- "remember:key:value" - to remember something
+- "wait" - to wait
+
+Example response:
+{{
+  "reasoning": "I should check the time in UTC as requested in my goals",
+  "confidence": 0.8,
+  "proposed_actions": ["use_tool:http:get_time"]
+}}"#,
             self.id,
             self.goals,
             observation.timestamp,
@@ -174,9 +192,26 @@ Format your response as JSON with keys: reasoning, confidence, proposed_actions"
 
         let response = self.llm.complete(&prompt).await?;
 
+        // Log the raw LLM response for debugging
+        info!("LLM response: {}", response);
+
+        // Clean the response - remove comments
+        let cleaned_response = response
+            .lines()
+            .map(|line| {
+                if let Some(comment_pos) = line.find("//") {
+                    &line[..comment_pos]
+                } else {
+                    line
+                }
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+
         // Parse LLM response
         let thought_json: serde_json::Value =
-            serde_json::from_str(&response).unwrap_or_else(|_| {
+            serde_json::from_str(&cleaned_response).unwrap_or_else(|e| {
+                warn!("Failed to parse JSON from LLM: {}", e);
                 serde_json::json!({
                     "reasoning": response,
                     "confidence": 0.5,
@@ -219,13 +254,26 @@ Format your response as JSON with keys: reasoning, confidence, proposed_actions"
         let first_action = &thought.proposed_actions[0];
 
         if first_action.starts_with("use_tool:") {
-            let parts: Vec<&str> = first_action.splitn(2, ':').collect();
-            if parts.len() == 2 {
-                return Ok(Action::UseTool {
-                    name: parts[1].to_string(),
-                    params: serde_json::json!({}),
-                });
-            }
+            let tool_part = &first_action[9..]; // Skip "use_tool:"
+            
+            // Handle tool names like "http:get_time"
+            // For now, pass simple default parameters
+            let params = if tool_part.contains("get_time") {
+                serde_json::json!({"timezone": "UTC"})
+            } else if tool_part.contains("check_weather") {
+                serde_json::json!({"city": "London"})
+            } else if tool_part.contains("calculate") {
+                serde_json::json!({"expression": "2 + 2"})
+            } else if tool_part.contains("fetch_url") {
+                serde_json::json!({"url": "https://httpbin.org/json"})
+            } else {
+                serde_json::json!({})
+            };
+            
+            return Ok(Action::UseTool {
+                name: tool_part.to_string(),
+                params,
+            });
         }
 
         if first_action.starts_with("remember:") {

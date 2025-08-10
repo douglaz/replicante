@@ -1,0 +1,16 @@
+[agent]
+id = "test-agent"
+log_level = "debug"
+
+[llm]
+provider = "anthropic"
+model = "claude-3-opus-20240229"
+
+# Test with a simple echo command as MCP server
+[[mcp_servers]]
+name = "test-echo"
+transport = "stdio"
+command = "echo"
+args = ["{'jsonrpc':'2.0','result':{'protocol_version':'2024-11-05','server_info':{'name':'echo','version':'1.0.0'},'capabilities':{}},'id':1}"]
+
+database_path = "test.db"
