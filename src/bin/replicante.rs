@@ -165,7 +165,7 @@ async fn main() -> Result<()> {
             SupervisorCommands::Start { config, web_port } => {
                 info!("Starting supervisor daemon");
 
-                let mut supervisor_config = if let Some(path) = config {
+                let mut supervisor_config = if let Some(ref path) = config {
                     let contents = tokio::fs::read_to_string(path).await?;
                     toml::from_str(&contents)?
                 } else {
@@ -176,9 +176,7 @@ async fn main() -> Result<()> {
                     supervisor_config.web_port = Some(port);
                 }
 
-                let daemon = supervisor::daemon::Daemon::new(Some(std::path::PathBuf::from(
-                    "supervisor.toml",
-                )))
+                let daemon = supervisor::daemon::Daemon::new(config)
                 .await?;
                 daemon.run().await?;
             }
