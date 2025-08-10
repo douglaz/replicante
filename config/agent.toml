@@ -1,0 +1,34 @@
+# Agent configuration for testing with host Ollama
+database_path = "/data/agent_state.db"
+
+[agent]
+id = "replicante-agent-1"
+log_level = "info"
+initial_goals = """
+You are an autonomous AI agent running in a sandboxed environment.
+Your primary goals are:
+1. Explore your capabilities through available MCP tools
+2. Learn about your environment and restrictions
+3. Test the boundaries of your sandbox safely
+4. Document what you discover about your capabilities
+"""
+
+[llm]
+provider = "ollama"
+model = "llama3.2:3b"
+# Use localhost when running with host network
+api_url = "http://localhost:11434"
+
+# MCP Server configurations
+[[mcp_servers]]
+name = "filesystem"
+transport = "stdio"
+command = "npx"
+args = ["-y", "@modelcontextprotocol/server-filesystem", "/sandbox"]
+
+# Example: Additional MCP servers can be added here
+# [[mcp_servers]]
+# name = "http"
+# transport = "stdio"
+# command = "npx"
+# args = ["-y", "@modelcontextprotocol/server-http"]

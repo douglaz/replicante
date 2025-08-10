@@ -1,0 +1,60 @@
+# Supervisor-specific Dockerfile
+FROM rust:1.88-alpine AS builder
+
+# Install build dependencies
+RUN apk add --no-cache \
+    musl-dev \
+    pkgconfig \
+    openssl-dev \
+    sqlite-dev \
+    sqlite-static
+
+# Create app directory
+WORKDIR /app
+
+# Copy source code
+COPY Cargo.toml Cargo.lock ./
+COPY src ./src
+
+# Build the application
+RUN cargo build --release --target x86_64-unknown-linux-musl
+
+# Runtime stage
+FROM alpine:3.19
+
+# Install runtime dependencies
+RUN apk add --no-cache \
+    ca-certificates \
+    sqlite-libs \
+    curl \
+    procps \
+    htop
+
+# Create non-root user
+RUN addgroup -g 1000 supervisor && \
+    adduser -D -u 1000 -G supervisor supervisor
+
+# Copy binary from builder
+COPY --from=builder /app/target/x86_64-unknown-linux-musl/release/replicante /usr/local/bin/replicante
+
+# Create necessary directories
+RUN mkdir -p /data /config /logs && \
+    chown -R supervisor:supervisor /data /logs
+
+# Switch to non-root user
+USER supervisor
+WORKDIR /home/supervisor
+
+# Default environment variables
+ENV RUST_LOG=info
+
+# Expose dashboard port
+EXPOSE 8080
+
+# Health check for supervisor
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+    CMD curl -f http://localhost:8080/api/status || exit 1
+
+# Default command
+ENTRYPOINT ["/usr/local/bin/replicante"]
+CMD ["supervisor", "start"]
