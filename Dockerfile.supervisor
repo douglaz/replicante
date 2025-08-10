@@ -1,12 +1,13 @@
 # Supervisor-specific Dockerfile
-FROM rust:1.75-alpine AS builder
+FROM rust:1.88-alpine AS builder
 
 # Install build dependencies
 RUN apk add --no-cache \
     musl-dev \
     pkgconfig \
     openssl-dev \
-    sqlite-dev
+    sqlite-dev \
+    sqlite-static
 
 # Create app directory
 WORKDIR /app
@@ -36,9 +37,6 @@ RUN addgroup -g 1000 supervisor && \
 # Copy binary from builder
 COPY --from=builder /app/target/x86_64-unknown-linux-musl/release/replicante /usr/local/bin/replicante
 
-# Copy web dashboard files
-COPY web /usr/share/replicante/web
-
 # Create necessary directories
 RUN mkdir -p /data /config /logs && \
     chown -R supervisor:supervisor /data /logs
@@ -49,7 +47,6 @@ WORKDIR /home/supervisor
 
 # Default environment variables
 ENV RUST_LOG=info
-ENV WEB_ROOT=/usr/share/replicante/web
 
 # Expose dashboard port
 EXPOSE 8080

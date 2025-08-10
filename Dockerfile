@@ -1,12 +1,13 @@
 # Multi-stage build for Replicante
-FROM rust:1.75-alpine AS builder
+FROM rust:1.88-alpine AS builder
 
 # Install build dependencies
 RUN apk add --no-cache \
     musl-dev \
     pkgconfig \
     openssl-dev \
-    sqlite-dev
+    sqlite-dev \
+    sqlite-static
 
 # Create app directory
 WORKDIR /app
@@ -25,7 +26,9 @@ FROM alpine:3.19
 RUN apk add --no-cache \
     ca-certificates \
     sqlite-libs \
-    curl
+    curl \
+    nodejs \
+    npm
 
 # Create non-root user
 RUN addgroup -g 1000 replicante && \
