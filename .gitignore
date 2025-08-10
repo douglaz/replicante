@@ -30,3 +30,6 @@ Thumbs.db
 
 # Test artifacts
 test-*.sh
+
+
+*.local.*
