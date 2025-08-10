@@ -1,5 +1,5 @@
 /// Core Components Compile-Time Verification Test
-/// 
+///
 /// This test file ensures that critical autonomous reasoning components exist
 /// in the codebase. It will fail at COMPILE TIME if any of these components
 /// are removed during refactoring, providing immediate feedback.
@@ -19,7 +19,7 @@ fn verify_autonomous_reasoning_components_exist() {
 #[allow(dead_code)]
 fn verify_replicante_struct_exists() {
     use replicante::*;
-    
+
     // Create a hypothetical Replicante-like structure signature
     // This verifies the essential components are accessible
     struct _ReplicanteSignature {
@@ -30,7 +30,7 @@ fn verify_replicante_struct_exists() {
         config: Config,
         goals: String,
     }
-    
+
     // Verify the reasoning cycle methods exist by referencing their signatures
     // These would be on the actual Replicante struct (private in lib.rs)
     trait _ReplicanteMethods {
@@ -41,15 +41,25 @@ fn verify_replicante_struct_exists() {
         async fn learn(&mut self) -> anyhow::Result<()>;
         async fn reasoning_cycle(&mut self) -> anyhow::Result<()>;
     }
-    
+
     // Placeholder types for compilation checking
     struct _Observation;
     struct _Thought;
     enum _Action {
-        UseTool { name: String, params: serde_json::Value },
-        Think { about: String },
-        Remember { key: String, value: serde_json::Value },
-        Wait { duration: std::time::Duration },
+        UseTool {
+            name: String,
+            params: serde_json::Value,
+        },
+        Think {
+            about: String,
+        },
+        Remember {
+            key: String,
+            value: serde_json::Value,
+        },
+        Wait {
+            duration: std::time::Duration,
+        },
         Explore,
     }
 }
@@ -60,7 +70,7 @@ fn verify_public_api_exists() {
     // These imports will fail if the functions don't exist
     use replicante::{run_agent, run_sandboxed};
     use std::path::PathBuf;
-    
+
     // Verify function signatures
     let _: fn(Option<PathBuf>) -> _ = run_agent;
     let _: fn(Option<PathBuf>) -> _ = run_sandboxed;
@@ -69,8 +79,8 @@ fn verify_public_api_exists() {
 /// Verify LLM provider system exists
 #[test]
 fn verify_llm_system_exists() {
-    use replicante::llm::{create_provider, LLMConfig};
-    
+    use replicante::llm::{LLMConfig, create_provider};
+
     // Test that we can create a mock provider
     let config = LLMConfig {
         provider: "mock".to_string(),
@@ -80,7 +90,7 @@ fn verify_llm_system_exists() {
         max_tokens: None,
         api_url: None,
     };
-    
+
     // This will panic at runtime if mock provider doesn't exist,
     // but will fail to compile if the LLM system is removed
     let provider = create_provider(&config);
@@ -98,7 +108,12 @@ fn verify_state_manager_exists() {
             async fn remember(&self, key: &str, value: serde_json::Value) -> anyhow::Result<()>;
             async fn recall(&self, key: &str) -> anyhow::Result<Option<serde_json::Value>>;
             async fn get_memory(&self) -> anyhow::Result<serde_json::Value>;
-            async fn record_decision(&self, thought: &str, action: &str, result: Option<&str>) -> anyhow::Result<()>;
+            async fn record_decision(
+                &self,
+                thought: &str,
+                action: &str,
+                result: Option<&str>,
+            ) -> anyhow::Result<()>;
             async fn get_recent_decisions(&self, limit: usize) -> anyhow::Result<Vec<String>>;
         }
     }
@@ -108,7 +123,7 @@ fn verify_state_manager_exists() {
 #[test]
 fn verify_mcp_client_exists() {
     use replicante::mcp::{MCPClient, MCPServerConfig};
-    
+
     // Verify types exist
     let _config = MCPServerConfig {
         name: "test".to_string(),
@@ -116,13 +131,17 @@ fn verify_mcp_client_exists() {
         command: "echo".to_string(),
         args: vec![],
     };
-    
+
     // Verify MCPClient type exists
     fn _check_mcp_client() {
         trait _MCPClientMethods {
             async fn new(configs: &[MCPServerConfig]) -> anyhow::Result<MCPClient>;
             async fn list_tools(&self) -> anyhow::Result<Vec<String>>;
-            async fn use_tool(&self, name: &str, params: serde_json::Value) -> anyhow::Result<serde_json::Value>;
+            async fn use_tool(
+                &self,
+                name: &str,
+                params: serde_json::Value,
+            ) -> anyhow::Result<serde_json::Value>;
             fn server_count(&self) -> usize;
         }
     }
@@ -134,7 +153,7 @@ fn verify_config_exists() {
     use replicante::Config;
     use replicante::config::AgentConfig;
     use replicante::llm::LLMConfig;
-    
+
     // Verify we can reference the config types
     fn _check_config_structure() {
         let _: Option<Config> = None;
@@ -146,8 +165,8 @@ fn verify_config_exists() {
 /// Meta-test: Verify our mock LLM provider exists for testing
 #[test]
 fn verify_mock_llm_provider_exists() {
-    use replicante::llm::{create_provider, LLMConfig};
-    
+    use replicante::llm::{LLMConfig, create_provider};
+
     let config = LLMConfig {
         provider: "mock".to_string(),
         api_key: None,
@@ -156,7 +175,7 @@ fn verify_mock_llm_provider_exists() {
         max_tokens: None,
         api_url: None,
     };
-    
+
     match create_provider(&config) {
         Ok(_) => {
             // Mock provider exists - good!
@@ -171,28 +190,28 @@ fn verify_mock_llm_provider_exists() {
 #[test]
 fn autonomous_reasoning_requirements() {
     // This test serves as documentation and will fail if requirements aren't met
-    
+
     // 1. LLM Provider trait and implementation
     use replicante::LLMProvider;
     let _: Option<Box<dyn LLMProvider>> = None;
-    
+
     // 2. State management
     use replicante::StateManager;
     let _: Option<StateManager> = None;
-    
+
     // 3. MCP client for tool usage
     use replicante::mcp::MCPClient;
     let _: Option<MCPClient> = None;
-    
+
     // 4. Configuration system
     use replicante::Config;
     let _: Option<Config> = None;
-    
+
     // 5. Entry points
     use replicante::{run_agent, run_sandboxed};
     let _: fn(Option<std::path::PathBuf>) -> _ = run_agent;
     let _: fn(Option<std::path::PathBuf>) -> _ = run_sandboxed;
-    
+
     // If we get here, all required components exist
     assert!(true, "All autonomous reasoning components are present");
 }

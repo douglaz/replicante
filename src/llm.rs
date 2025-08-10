@@ -249,7 +249,7 @@ impl LLMProvider for MockLLMProvider {
     async fn complete(&self, _prompt: &str) -> Result<String> {
         let mut counter = self.response_counter.lock().unwrap();
         *counter += 1;
-        
+
         // Return different responses based on call count to simulate reasoning
         let response = match *counter {
             1 => {
@@ -285,7 +285,7 @@ impl LLMProvider for MockLLMProvider {
                 }"#
             }
         };
-        
+
         Ok(response.to_string())
     }
 }
@@ -309,7 +309,7 @@ mod tests {
         // Provider created successfully
         Ok(())
     }
-    
+
     #[test]
     fn test_create_mock_provider() -> Result<()> {
         let config = LLMConfig {
@@ -325,23 +325,23 @@ mod tests {
         // Mock provider created successfully
         Ok(())
     }
-    
+
     #[tokio::test]
     async fn test_mock_provider_responses() -> Result<()> {
         let provider = MockLLMProvider::new();
-        
+
         // First response should be explore
         let response1 = provider.complete("test prompt").await?;
         assert!(response1.contains("explore"));
-        
+
         // Second response should use tool
         let response2 = provider.complete("test prompt").await?;
         assert!(response2.contains("use_tool"));
-        
+
         // Third response should remember
         let response3 = provider.complete("test prompt").await?;
         assert!(response3.contains("remember"));
-        
+
         Ok(())
     }
 }
