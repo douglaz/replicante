@@ -10,11 +10,17 @@ api.openai.com
 # Development and testing (remove in production)
 localhost
 127.0.0.1
+host.docker.internal
 
 # Internal services
 supervisor
 replicante-supervisor
 172.20.0.0/16
+
+# Ollama LLM service (local)
+# Allow access to host's Ollama instance
+.ollama.ai
+ollama.ai
 
 # Optional: Common CDNs for model downloads (use with caution)
 # .huggingface.co
