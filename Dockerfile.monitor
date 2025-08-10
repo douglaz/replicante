@@ -1,0 +1,58 @@
+# Dockerfile for network monitor
+FROM rust:1.75-alpine AS builder
+
+# Install build dependencies
+RUN apk add --no-cache \
+    musl-dev \
+    pkgconfig
+
+# Create app directory
+WORKDIR /app
+
+# Copy source files
+COPY Cargo.toml Cargo.lock ./
+COPY src ./src
+
+# Build only the network-monitor binary
+RUN cargo build --release --bin network-monitor --target x86_64-unknown-linux-musl
+
+# Runtime stage
+FROM alpine:3.19
+
+# Install runtime dependencies
+RUN apk add --no-cache \
+    ca-certificates \
+    iproute2 \
+    iptables \
+    tcpdump \
+    curl
+
+# Create non-root user for monitor
+RUN addgroup -g 1000 monitor && \
+    adduser -D -u 1000 -G monitor monitor
+
+# Copy binary from builder
+COPY --from=builder /app/target/x86_64-unknown-linux-musl/release/network-monitor /usr/local/bin/network-monitor
+
+# Create necessary directories
+RUN mkdir -p /data /logs && \
+    chown -R monitor:monitor /data /logs
+
+# Copy monitoring scripts
+COPY network-policy/monitor-traffic.sh /usr/local/bin/monitor-traffic.sh
+RUN chmod +x /usr/local/bin/monitor-traffic.sh
+
+# Switch to non-root user (but will need CAP_NET_ADMIN)
+USER monitor
+WORKDIR /home/monitor
+
+# Default environment variables
+ENV RUST_LOG=info
+ENV MONITOR_INTERVAL=5
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+    CMD ps aux | grep -q network-monitor || exit 1
+
+# Default command
+ENTRYPOINT ["/usr/local/bin/network-monitor"]

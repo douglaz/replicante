@@ -1,0 +1,51 @@
+# Default sandbox configuration - Moderate restrictions
+[sandbox]
+enabled = true
+mode = "Moderate"  # Strict, Moderate, or Permissive
+
+[sandbox.filesystem]
+root = "/sandbox"
+read_only_paths = ["/config"]
+write_paths = ["/sandbox/workspace", "/tmp"]
+blocked_paths = ["/etc", "/sys", "/proc", "/dev", "/root", "/home"]
+max_file_size_mb = 10
+max_total_size_mb = 100
+
+[sandbox.network]
+mode = "Filtered"  # None, Filtered, or Full
+allowed_domains = [
+    "api.anthropic.com",
+    "api.openai.com",
+    "localhost",
+    "127.0.0.1"
+]
+blocked_domains = []
+allowed_ports = [80, 443, 8080]
+blocked_ports = [22, 3389, 5432, 3306, 6379, 27017]
+rate_limit_per_minute = 100
+max_connections = 10
+
+[sandbox.resources]
+max_memory_mb = 512
+max_cpu_percent = 50.0
+max_processes = 10
+max_threads = 50
+max_open_files = 100
+max_file_descriptors = 256
+
+[sandbox.mcp]
+allowed_servers = ["filesystem", "http"]
+blocked_servers = []
+allowed_tools = []
+blocked_tools = [
+    "shell:execute",
+    "filesystem:delete",
+    "filesystem:write:/etc/*",
+    "filesystem:write:/sys/*",
+    "filesystem:write:/proc/*"
+]
+
+[sandbox.mcp.tool_rate_limits]
+"http:fetch_url" = 30
+"filesystem:write" = 50
+"filesystem:read" = 100

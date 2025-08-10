@@ -52,6 +52,19 @@ json = "0.12"
 futures = "0.3"
 tokio-util = { version = "0.7", features = ["codec"] }
 
+# Web server for dashboard
+warp = "0.3"
+
+# URL parsing
+url = "2.5"
+
+# Command-line argument parsing
+clap = { version = "4.5", features = ["derive", "env"] }
+
+# Unix system operations (for resource limits)
+[target.'cfg(unix)'.dependencies]
+nix = { version = "0.27", features = ["resource", "signal"] }
+
 [dev-dependencies]
 tempfile = "3.8"
 

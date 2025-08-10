@@ -1,0 +1,160 @@
+version: '3.8'
+
+# Enhanced network security stack for Replicante
+# This adds proxy, DNS filtering, and network monitoring
+
+services:
+  # HTTP/HTTPS Filtering Proxy
+  proxy:
+    image: ubuntu/squid:latest
+    container_name: replicante-proxy
+    volumes:
+      - ./proxy/squid.conf:/etc/squid/squid.conf:ro
+      - ./proxy/whitelist.txt:/etc/squid/whitelist.txt:ro
+      - proxy-logs:/var/log/squid
+    networks:
+      replicante-net:
+        ipv4_address: 172.20.0.2
+    ports:
+      - "3128:3128"  # Proxy port (only expose if needed for debugging)
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "squid", "-k", "check"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    
+  # DNS Server with filtering
+  dns:
+    image: jpillora/dnsmasq:latest
+    container_name: replicante-dns
+    volumes:
+      - ./dns/dnsmasq.conf:/etc/dnsmasq.conf:ro
+      - ./dns/hosts.allow:/etc/hosts.allow:ro
+    networks:
+      replicante-net:
+        ipv4_address: 172.20.0.3
+    cap_add:
+      - NET_ADMIN
+    restart: unless-stopped
+    command: ["--no-daemon", "--log-queries", "--log-facility=-"]
+  
+  # Network Monitor (Rust binary)
+  network-monitor:
+    build:
+      context: .
+      dockerfile: Dockerfile.monitor
+    container_name: replicante-netmon
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - monitor-data:/data
+      - ./logs/network:/logs
+    networks:
+      - replicante-net
+    environment:
+      - RUST_LOG=info
+      - MONITOR_INTERVAL=5
+      - SUPERVISOR_URL=http://supervisor:8080
+    cap_add:
+      - NET_ADMIN
+      - SYS_PTRACE
+      - SYS_ADMIN
+    restart: unless-stopped
+    depends_on:
+      - supervisor
+
+  # Modified supervisor with network monitoring
+  supervisor-enhanced:
+    extends:
+      file: docker-compose.yml
+      service: supervisor
+    depends_on:
+      - proxy
+      - dns
+    environment:
+      - NETWORK_MONITOR_ENABLED=true
+      - PROXY_URL=http://172.20.0.2:3128
+      - DNS_SERVER=172.20.0.3
+
+  # Secured agent with proxy and DNS
+  agent-secured:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: replicante-agent-secured
+    command: ["sandbox", "--config", "/config/agent.toml", "--sandbox-config", "/config/sandbox-strict.toml"]
+    volumes:
+      - ./config:/config:ro
+      - sandbox-secured:/sandbox
+      - agent-secured-data:/data
+    networks:
+      replicante-net:
+        ipv4_address: 172.20.0.100
+    environment:
+      - HTTP_PROXY=http://172.20.0.2:3128
+      - HTTPS_PROXY=http://172.20.0.2:3128
+      - NO_PROXY=localhost,127.0.0.1,supervisor,172.20.0.0/16
+      - RUST_LOG=info
+    dns:
+      - 172.20.0.3
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+      - apparmor:docker-default
+      - seccomp:./security/seccomp-profile.json
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_BIND_SERVICE
+    depends_on:
+      - proxy
+      - dns
+      - supervisor-enhanced
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+        reservations:
+          cpus: '0.25'
+          memory: 128M
+
+  # Traffic analyzer (using tcpdump in a minimal container)
+  traffic-analyzer:
+    image: nicolaka/netshoot:latest
+    container_name: replicante-tcpdump
+    volumes:
+      - ./logs/pcap:/pcap
+      - ./network-policy/capture.sh:/capture.sh:ro
+    networks:
+      - replicante-net
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    command: ["/bin/bash", "/capture.sh"]
+    restart: unless-stopped
+
+networks:
+  replicante-net:
+    external: true
+    name: replicante_replicante-net
+
+volumes:
+  proxy-logs:
+    driver: local
+  monitor-data:
+    driver: local
+    driver_opts:
+      o: "size=100m"
+  sandbox-secured:
+    driver: local
+    driver_opts:
+      o: "size=100m"
+  agent-secured-data:
+    driver: local
+    driver_opts:
+      o: "size=50m"

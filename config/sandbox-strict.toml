@@ -1,0 +1,42 @@
+# Strict sandbox configuration - Maximum isolation
+[sandbox]
+enabled = true
+mode = "Strict"
+
+[sandbox.filesystem]
+root = "/sandbox"
+read_only_paths = []
+write_paths = ["/sandbox/workspace"]
+blocked_paths = ["/", "/etc", "/sys", "/proc", "/dev", "/root", "/home", "/var", "/usr", "/bin", "/sbin", "/lib"]
+max_file_size_mb = 1
+max_total_size_mb = 10
+
+[sandbox.network]
+mode = "Filtered"
+allowed_domains = [
+    "api.anthropic.com",
+    "api.openai.com"
+]
+blocked_domains = ["*"]  # Block everything else
+allowed_ports = [443]  # HTTPS only
+blocked_ports = []  # All other ports blocked by default
+rate_limit_per_minute = 10
+max_connections = 2
+
+[sandbox.resources]
+max_memory_mb = 128
+max_cpu_percent = 25.0
+max_processes = 5
+max_threads = 10
+max_open_files = 20
+max_file_descriptors = 50
+
+[sandbox.mcp]
+allowed_servers = []  # No MCP servers by default
+blocked_servers = ["*"]
+allowed_tools = []
+blocked_tools = ["*"]  # Block all tools
+
+[sandbox.mcp.tool_rate_limits]
+# Very restrictive rate limits
+"*" = 1  # 1 call per minute for any tool

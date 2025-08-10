@@ -1,0 +1,168 @@
+version: '3.8'
+
+services:
+  # Supervisor service - monitors and controls agents
+  supervisor:
+    build:
+      context: .
+      dockerfile: Dockerfile.supervisor
+    container_name: replicante-supervisor
+    command: ["supervisor", "start", "--config", "/config/supervisor.toml"]
+    ports:
+      - "8080:8080"  # Web dashboard
+    volumes:
+      - ./config:/config:ro
+      - supervisor-data:/data
+      - ./logs:/logs
+      # Docker socket for container management (optional)
+      # - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - replicante-net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/api/status"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Sandboxed agent - runs with restrictions
+  agent-sandboxed:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: replicante-agent-1
+    command: ["sandbox", "--config", "/config/agent.toml", "--sandbox-config", "/config/sandbox.toml"]
+    depends_on:
+      - supervisor
+    volumes:
+      - ./config:/config:ro
+      - sandbox-workspace:/sandbox
+      - agent-data:/data
+    networks:
+      - replicante-net
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+      - apparmor:docker-default
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_BIND_SERVICE
+    environment:
+      - RUST_LOG=info
+      - SUPERVISOR_URL=http://supervisor:8080
+    restart: unless-stopped
+    # Resource limits
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 512M
+        reservations:
+          cpus: '0.5'
+          memory: 256M
+
+  # Optional: Additional sandboxed agents
+  agent-sandboxed-2:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: replicante-agent-2
+    command: ["sandbox", "--config", "/config/agent-2.toml", "--sandbox-config", "/config/sandbox-strict.toml"]
+    depends_on:
+      - supervisor
+    volumes:
+      - ./config:/config:ro
+      - sandbox-workspace-2:/sandbox
+      - agent-data-2:/data
+    networks:
+      - replicante-net
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+      - apparmor:docker-default
+    cap_drop:
+      - ALL
+    environment:
+      - RUST_LOG=info
+      - SUPERVISOR_URL=http://supervisor:8080
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+        reservations:
+          cpus: '0.25'
+          memory: 128M
+
+  # Optional: Prometheus for metrics
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: replicante-prometheus
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    networks:
+      - replicante-net
+    ports:
+      - "9090:9090"
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+    restart: unless-stopped
+
+  # Optional: Grafana for visualization
+  grafana:
+    image: grafana/grafana:latest
+    container_name: replicante-grafana
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./monitoring/grafana:/etc/grafana/provisioning:ro
+    networks:
+      - replicante-net
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+    restart: unless-stopped
+    depends_on:
+      - prometheus
+
+networks:
+  replicante-net:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
+
+volumes:
+  supervisor-data:
+    driver: local
+    driver_opts:
+      o: "size=100m"
+  agent-data:
+    driver: local
+    driver_opts:
+      o: "size=100m"
+  agent-data-2:
+    driver: local
+    driver_opts:
+      o: "size=100m"
+  sandbox-workspace:
+    driver: local
+    driver_opts:
+      o: "size=500m"
+  sandbox-workspace-2:
+    driver: local
+    driver_opts:
+      o: "size=500m"
+  prometheus-data:
+    driver: local
+  grafana-data:
+    driver: local

@@ -1,0 +1,15 @@
+# Additional hosts file for allowed services
+# This supplements dnsmasq.conf with static entries
+
+# Internal Docker services
+172.20.0.2    proxy proxy.replicante
+172.20.0.3    dns dns.replicante
+172.20.0.5    supervisor supervisor.replicante
+172.20.0.100  agent-secured agent-secured.replicante
+
+# Localhost variations
+127.0.0.1     localhost
+::1           localhost
+
+# Required for container health checks
+172.20.0.1    host.docker.internal
