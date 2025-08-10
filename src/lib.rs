@@ -410,7 +410,7 @@ pub async fn run_agent(config_path: Option<PathBuf>) -> Result<()> {
 
     info!("Agent initialized successfully");
     info!("Beginning autonomous operation...");
-    
+
     agent.run().await
 }
 

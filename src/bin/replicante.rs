@@ -176,8 +176,7 @@ async fn main() -> Result<()> {
                     supervisor_config.web_port = Some(port);
                 }
 
-                let daemon = supervisor::daemon::Daemon::new(config)
-                .await?;
+                let daemon = supervisor::daemon::Daemon::new(config).await?;
                 daemon.run().await?;
             }
 
