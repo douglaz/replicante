@@ -92,7 +92,7 @@ impl Replicante {
         );
 
         // Initialize state manager
-        let state = StateManager::new(&config.database_path)?;
+        let state = StateManager::new(&config.database_path).await?;
         info!("State manager initialized");
 
         // Record birth
