@@ -47,7 +47,7 @@ impl StateManager {
             [],
         )?;
 
-        info!("Database initialized at: {}", database_path);
+        info!("Database initialized at: {database_path}");
 
         Ok(Self {
             conn: Arc::new(Mutex::new(conn)),
@@ -67,7 +67,7 @@ impl StateManager {
             params![key, value_str],
         )?;
 
-        debug!("Remembered: {} = {}", key, value_str);
+        debug!("Remembered: {key} = {value_str}");
         Ok(())
     }
 
@@ -119,7 +119,7 @@ impl StateManager {
             params![thought, action, result],
         )?;
 
-        debug!("Recorded decision: {} -> {}", thought, action);
+        debug!("Recorded decision: {thought} -> {action}");
         Ok(())
     }
 

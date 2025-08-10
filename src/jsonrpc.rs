@@ -80,6 +80,7 @@ impl Request {
 }
 
 impl Response {
+    #[allow(dead_code)]
     pub fn success(id: Option<RequestId>, result: Value) -> Self {
         Self {
             jsonrpc: "2.0".to_string(),
@@ -89,6 +90,7 @@ impl Response {
         }
     }
 
+    #[allow(dead_code)]
     pub fn error(id: Option<RequestId>, code: i64, message: impl Into<String>) -> Self {
         Self {
             jsonrpc: "2.0".to_string(),
@@ -105,13 +107,16 @@ impl Response {
 
 impl Message {
     pub fn parse(json: &str) -> Result<Self> {
-        serde_json::from_str(json).map_err(|e| anyhow::anyhow!("Failed to parse JSON-RPC message: {}", e))
+        serde_json::from_str(json)
+            .map_err(|e| anyhow::anyhow!("Failed to parse JSON-RPC message: {}", e))
     }
 
     pub fn to_string(&self) -> Result<String> {
-        serde_json::to_string(self).map_err(|e| anyhow::anyhow!("Failed to serialize JSON-RPC message: {}", e))
+        serde_json::to_string(self)
+            .map_err(|e| anyhow::anyhow!("Failed to serialize JSON-RPC message: {}", e))
     }
 
+    #[allow(dead_code)]
     pub fn id(&self) -> Option<&RequestId> {
         match self {
             Message::Request(req) => req.id.as_ref(),
@@ -122,6 +127,7 @@ impl Message {
 }
 
 // Standard JSON-RPC error codes
+#[allow(dead_code)]
 pub mod error_codes {
     pub const PARSE_ERROR: i64 = -32700;
     pub const INVALID_REQUEST: i64 = -32600;
