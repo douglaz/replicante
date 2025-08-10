@@ -25,6 +25,7 @@ pub fn create_provider(config: &LLMConfig) -> Result<Box<dyn LLMProvider>> {
         "anthropic" => Ok(Box::new(AnthropicProvider::new(config)?)),
         "openai" => Ok(Box::new(OpenAIProvider::new(config)?)),
         "ollama" => Ok(Box::new(OllamaProvider::new(config)?)),
+        "mock" => Ok(Box::new(MockLLMProvider::new())),
         _ => bail!("Unknown LLM provider: {}", config.provider),
     }
 }
@@ -230,6 +231,65 @@ impl LLMProvider for OllamaProvider {
     }
 }
 
+// Mock LLM Provider for testing
+pub struct MockLLMProvider {
+    response_counter: std::sync::Arc<std::sync::Mutex<usize>>,
+}
+
+impl MockLLMProvider {
+    pub fn new() -> Self {
+        Self {
+            response_counter: std::sync::Arc::new(std::sync::Mutex::new(0)),
+        }
+    }
+}
+
+#[async_trait]
+impl LLMProvider for MockLLMProvider {
+    async fn complete(&self, _prompt: &str) -> Result<String> {
+        let mut counter = self.response_counter.lock().unwrap();
+        *counter += 1;
+        
+        // Return different responses based on call count to simulate reasoning
+        let response = match *counter {
+            1 => {
+                // First call - return exploration action
+                r#"{
+                    "reasoning": "I should explore my environment to understand my capabilities",
+                    "confidence": 0.9,
+                    "proposed_actions": ["explore"]
+                }"#
+            }
+            2 => {
+                // Second call - use a tool
+                r#"{
+                    "reasoning": "I should list the directory contents to see what's available",
+                    "confidence": 0.85,
+                    "proposed_actions": ["use_tool:filesystem:list_directory"]
+                }"#
+            }
+            3 => {
+                // Third call - remember something
+                r#"{
+                    "reasoning": "I should remember what I've learned about my environment",
+                    "confidence": 0.8,
+                    "proposed_actions": ["remember:test_key:test_value"]
+                }"#
+            }
+            _ => {
+                // Default - wait
+                r#"{
+                    "reasoning": "I should wait and observe",
+                    "confidence": 0.7,
+                    "proposed_actions": ["wait"]
+                }"#
+            }
+        };
+        
+        Ok(response.to_string())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -247,6 +307,41 @@ mod tests {
 
         let _provider = create_provider(&config)?;
         // Provider created successfully
+        Ok(())
+    }
+    
+    #[test]
+    fn test_create_mock_provider() -> Result<()> {
+        let config = LLMConfig {
+            provider: "mock".to_string(),
+            api_key: None,
+            model: "mock".to_string(),
+            temperature: None,
+            max_tokens: None,
+            api_url: None,
+        };
+
+        let _provider = create_provider(&config)?;
+        // Mock provider created successfully
+        Ok(())
+    }
+    
+    #[tokio::test]
+    async fn test_mock_provider_responses() -> Result<()> {
+        let provider = MockLLMProvider::new();
+        
+        // First response should be explore
+        let response1 = provider.complete("test prompt").await?;
+        assert!(response1.contains("explore"));
+        
+        // Second response should use tool
+        let response2 = provider.complete("test prompt").await?;
+        assert!(response2.contains("use_tool"));
+        
+        // Third response should remember
+        let response3 = provider.complete("test prompt").await?;
+        assert!(response3.contains("remember"));
+        
         Ok(())
     }
 }
