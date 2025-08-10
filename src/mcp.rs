@@ -101,6 +101,10 @@ impl MCPClient {
 
         server_guard.process = Some(child);
         let server_name = server_guard.name.clone();
+        
+        // Store stdin writer in the server struct first
+        let stdin = Arc::new(Mutex::new(stdin));
+        server_guard.stdin = Some(stdin.clone());
         drop(server_guard); // Release lock before spawning tasks
 
         // Spawn task to handle stdout (JSON-RPC responses)
@@ -143,12 +147,8 @@ impl MCPClient {
             }
         });
 
-        // Store stdin writer in the server struct
-        let stdin = Arc::new(Mutex::new(stdin));
-        {
-            let mut server_guard = server.lock().await;
-            server_guard.stdin = Some(stdin.clone());
-        }
+        // Wait a bit for the handlers to be ready
+        tokio::time::sleep(Duration::from_millis(100)).await;
         
         // Initialize the MCP connection
         Self::initialize_connection(server.clone(), stdin).await?;
@@ -299,6 +299,10 @@ impl MCPClient {
         Ok(())
     }
 
+    pub fn server_count(&self) -> usize {
+        self.servers.len()
+    }
+
     pub async fn list_tools(&self) -> Result<Vec<String>> {
         let mut all_tools = Vec::new();
 
@@ -427,9 +431,41 @@ impl Drop for MCPClient {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::jsonrpc::{Request, Message};
+
+    #[test]
+    fn test_json_rpc_request_creation() {
+        let request = Request::new("test_method", Some(serde_json::json!({"key": "value"})));
+        assert_eq!(request.jsonrpc, "2.0");
+        assert_eq!(request.method, "test_method");
+        assert!(request.id.is_some());
+    }
+
+    #[test]
+    fn test_json_rpc_message_parsing() {
+        let json = r#"{"jsonrpc":"2.0","id":1,"result":{"test":"value"}}"#;
+        let message = Message::parse(json).unwrap();
+        
+        match message {
+            Message::Response(response) => {
+                assert_eq!(response.jsonrpc, "2.0");
+                assert!(response.result.is_some());
+            }
+            _ => panic!("Expected Response message"),
+        }
+    }
+
+    #[test]
+    fn test_mcp_initialize_params() {
+        let params = InitializeParams::new("test-client".to_string(), "1.0.0".to_string());
+        assert_eq!(params.protocol_version, "2024-11-05");
+        assert_eq!(params.client_info.name, "test-client");
+        assert_eq!(params.client_info.version, "1.0.0");
+    }
 
     #[tokio::test]
-    async fn test_mcp_client_creation() -> Result<()> {
+    async fn test_mcp_client_creation_with_echo() -> Result<()> {
+        // Use a simple echo command that immediately exits
         let configs = vec![MCPServerConfig {
             name: "test".to_string(),
             transport: "stdio".to_string(),
@@ -440,5 +476,58 @@ mod tests {
         let client = MCPClient::new(&configs).await?;
         assert_eq!(client.servers.len(), 1);
         Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_mcp_client_handles_missing_command() -> Result<()> {
+        let configs = vec![MCPServerConfig {
+            name: "missing".to_string(),
+            transport: "stdio".to_string(),
+            command: "nonexistent_command_12345".to_string(),
+            args: vec![],
+        }];
+
+        // Should not panic, just log error
+        let client = MCPClient::new(&configs).await?;
+        assert_eq!(client.servers.len(), 1);
+        
+        // Server should not be initialized
+        let server = &client.servers[0];
+        let server_guard = server.lock().await;
+        assert!(!server_guard.initialized);
+        
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_list_tools_empty() -> Result<()> {
+        let configs = vec![];
+        let client = MCPClient::new(&configs).await?;
+        let tools = client.list_tools().await?;
+        assert!(tools.is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn test_tool_call_params() {
+        let params = ToolCallParams {
+            name: "test_tool".to_string(),
+            arguments: Some(serde_json::json!({"arg": "value"})),
+        };
+        
+        let json = serde_json::to_value(params).unwrap();
+        assert_eq!(json["name"], "test_tool");
+        assert_eq!(json["arguments"]["arg"], "value");
+    }
+
+    #[test]
+    fn test_content_item_text() {
+        let item = ContentItem::Text {
+            text: "Hello, world!".to_string(),
+        };
+        
+        let json = serde_json::to_value(&item).unwrap();
+        assert_eq!(json["type"], "text");
+        assert_eq!(json["text"], "Hello, world!");
     }
 }
