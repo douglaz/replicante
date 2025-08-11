@@ -85,7 +85,7 @@ model = "mock"
             }
             Err(e) => {
                 // Agent exited with error
-                eprintln!("Agent error: {}", e);
+                eprintln!("Agent error: {e}");
             }
         }
     });
@@ -187,7 +187,7 @@ model = "mock"
                 eprintln!("Agent exited normally");
             }
             Err(e) => {
-                eprintln!("Agent error: {}", e);
+                eprintln!("Agent error: {e}");
             }
         }
     });
@@ -205,8 +205,8 @@ model = "mock"
     // Should have made at least 2 decisions in 4 seconds with 1 second interval
     assert!(
         decisions.len() >= 2,
-        "Agent should have made multiple decisions, got: {}",
-        decisions.len()
+        "Agent should have made multiple decisions, got: {count}",
+        count = decisions.len()
     );
 
     // Verify decisions contain expected content

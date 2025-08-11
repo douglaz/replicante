@@ -9,6 +9,7 @@
 
 // This test doesn't run any code - it just verifies compilation
 #[test]
+#[allow(clippy::assertions_on_constants)]
 fn verify_autonomous_reasoning_components_exist() {
     // This test passes if it compiles. The actual execution is not important.
     assert!(true);
@@ -103,7 +104,7 @@ fn verify_state_manager_exists() {
     // Verify the type exists
     use replicante::StateManager;
     let _: Option<StateManager> = None;
-    
+
     fn _check_state_manager_methods() {
         // These would be the actual method signatures
         trait _StateManagerMethods {
@@ -190,6 +191,7 @@ fn verify_mock_llm_provider_exists() {
 
 /// This test documents what components MUST exist for autonomous reasoning
 #[test]
+#[allow(clippy::assertions_on_constants)]
 fn autonomous_reasoning_requirements() {
     // This test serves as documentation and will fail if requirements aren't met
 

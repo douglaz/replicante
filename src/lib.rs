@@ -91,17 +91,17 @@ impl Replicante {
         info!("Thinking about current situation...");
 
         let prompt = format!(
-            r#"You are an autonomous AI agent with the ID: {}
+            r#"You are an autonomous AI agent with the ID: {id}
             
-{}
+{goals}
 
 You can use tools via MCP, persist knowledge, and make decisions.
 
 Current observation:
-- Time: {}
-- Available tools: {:?}
-- Memory: {}
-- Recent events: {:?}
+- Time: {timestamp}
+- Available tools: {tools:?}
+- Memory: {memory}
+- Recent events: {events:?}
 
 Based on this observation and your goals, reason about what you should do next.
 Consider:
@@ -127,12 +127,12 @@ Example response:
   "confidence": 0.8,
   "proposed_actions": ["explore"]
 }}"#,
-            self.id,
-            self.goals,
-            observation.timestamp,
-            observation.available_tools,
-            serde_json::to_string_pretty(&observation.memory)?,
-            observation.recent_events
+            id = self.id,
+            goals = self.goals,
+            timestamp = observation.timestamp,
+            tools = observation.available_tools,
+            memory = serde_json::to_string_pretty(&observation.memory)?,
+            events = observation.recent_events
         );
 
         let response = self.llm.complete(&prompt).await?;
@@ -193,7 +193,7 @@ Example response:
         self.state
             .record_decision(
                 &thought.reasoning,
-                &format!("{:?}", thought.proposed_actions),
+                &format!("{actions:?}", actions = thought.proposed_actions),
                 None,
             )
             .await?;
@@ -215,7 +215,7 @@ Example response:
             } else if tool_part.contains("write_file") {
                 serde_json::json!({
                     "path": "/sandbox/agent_log.txt",
-                    "content": format!("Agent {} was here at {}", self.id, Utc::now())
+                    "content": format!("Agent {id} was here at {time}", id = self.id, time = Utc::now())
                 })
             } else {
                 serde_json::json!({})
@@ -261,7 +261,13 @@ Example response:
                 Ok(result) => {
                     info!("Tool {name} executed successfully");
                     self.state
-                        .remember(&format!("tool_result_{}", Utc::now().timestamp()), result)
+                        .remember(
+                            &format!(
+                                "tool_result_{timestamp}",
+                                timestamp = Utc::now().timestamp()
+                            ),
+                            result,
+                        )
                         .await?;
                 }
                 Err(e) => {
@@ -340,7 +346,7 @@ Example response:
                     // Log error but continue running
                     self.state
                         .remember(
-                            &format!("error_{}", Utc::now().timestamp()),
+                            &format!("error_{timestamp}", timestamp = Utc::now().timestamp()),
                             serde_json::json!({ "error": e.to_string() }),
                         )
                         .await?;
@@ -367,16 +373,19 @@ pub async fn run_agent(config_path: Option<PathBuf>) -> Result<()> {
     };
 
     // Initialize components
-    let id = format!("replicante-{}", uuid::Uuid::new_v4());
+    let id = format!("replicante-{uuid}", uuid = uuid::Uuid::new_v4());
     info!("Agent ID: {id}");
 
     let llm = llm::create_provider(&config.llm)?;
-    info!("LLM provider initialized: {}", config.llm.provider);
+    info!(
+        "LLM provider initialized: {provider}",
+        provider = config.llm.provider
+    );
 
     let mcp = MCPClient::new(&config.mcp_servers).await?;
     info!(
-        "MCP client initialized with {} servers",
-        config.mcp_servers.len()
+        "MCP client initialized with {count} servers",
+        count = config.mcp_servers.len()
     );
 
     let state = StateManager::new(&config.database_path).await?;
