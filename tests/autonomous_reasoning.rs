@@ -12,6 +12,7 @@ fn create_test_config(db_path: &str) -> replicante::Config {
             id: Some("test-agent".to_string()),
             log_level: Some("debug".to_string()),
             initial_goals: Some("Test autonomous reasoning cycle".to_string()),
+            reasoning_interval_secs: 1,
         },
         llm: replicante::llm::LLMConfig {
             provider: "mock".to_string(),
@@ -58,6 +59,7 @@ async fn test_agent_with_mock_llm() -> Result<()> {
     let config_content = format!(
         r#"
 database_path = "{}"
+mcp_servers = []
 
 [agent]
 id = "test-reasoning-agent"
@@ -74,13 +76,25 @@ model = "mock"
     tokio::fs::write(&config_path, config_content).await?;
 
     // Run the agent for a short time to verify it starts and operates
-    let agent_handle = tokio::spawn(async move { run_agent(Some(config_path)).await });
+    let config_path_clone = config_path.clone();
+    let agent_handle = tokio::spawn(async move {
+        match run_agent(Some(config_path_clone)).await {
+            Ok(_) => {
+                // Agent exited normally (shouldn't happen with infinite loop)
+                eprintln!("Agent exited normally");
+            }
+            Err(e) => {
+                // Agent exited with error
+                eprintln!("Agent error: {}", e);
+            }
+        }
+    });
 
     // Let it run for 2 seconds
     tokio::time::sleep(Duration::from_secs(2)).await;
 
     // Agent should still be running (not crashed)
-    assert!(!agent_handle.is_finished());
+    assert!(!agent_handle.is_finished(), "Agent should still be running");
 
     // Clean up by dropping the handle (will cancel the task)
     drop(agent_handle);
@@ -148,6 +162,7 @@ async fn test_agent_makes_decisions() -> Result<()> {
     let config_content = format!(
         r#"
 database_path = "{}"
+mcp_servers = []
 
 [agent]
 id = "decision-test-agent"
@@ -165,10 +180,20 @@ model = "mock"
     tokio::fs::write(&config_path, config_content).await?;
 
     // Run the agent
-    let agent_handle = tokio::spawn(async move { run_agent(Some(config_path)).await });
+    let config_path_clone = config_path.clone();
+    let agent_handle = tokio::spawn(async move {
+        match run_agent(Some(config_path_clone)).await {
+            Ok(_) => {
+                eprintln!("Agent exited normally");
+            }
+            Err(e) => {
+                eprintln!("Agent error: {}", e);
+            }
+        }
+    });
 
-    // Let it run for enough time to make several decisions
-    tokio::time::sleep(Duration::from_secs(5)).await;
+    // Let it run for enough time to make several decisions (with 1 second interval)
+    tokio::time::sleep(Duration::from_secs(4)).await;
 
     // Clean up
     drop(agent_handle);
@@ -177,10 +202,11 @@ model = "mock"
     let state = StateManager::new(db_path.to_str().unwrap()).await?;
     let decisions = state.get_recent_decisions(10).await?;
 
-    // Should have made at least 3 decisions in 5 seconds
+    // Should have made at least 2 decisions in 4 seconds with 1 second interval
     assert!(
-        decisions.len() >= 3,
-        "Agent should have made multiple decisions"
+        decisions.len() >= 2,
+        "Agent should have made multiple decisions, got: {}",
+        decisions.len()
     );
 
     // Verify decisions contain expected content

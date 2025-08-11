@@ -348,7 +348,8 @@ Example response:
             }
 
             // Brief pause between cycles
-            tokio::time::sleep(Duration::from_secs(10)).await;
+            let interval = self.config.agent.reasoning_interval_secs;
+            tokio::time::sleep(Duration::from_secs(interval)).await;
         }
     }
 }

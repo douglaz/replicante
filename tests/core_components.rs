@@ -101,8 +101,10 @@ fn verify_llm_system_exists() {
 #[test]
 fn verify_state_manager_exists() {
     // Verify the type exists
+    use replicante::StateManager;
+    let _: Option<StateManager> = None;
+    
     fn _check_state_manager_methods() {
-        use replicante::StateManager;
         // These would be the actual method signatures
         trait _StateManagerMethods {
             async fn remember(&self, key: &str, value: serde_json::Value) -> anyhow::Result<()>;
