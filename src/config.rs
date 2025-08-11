@@ -19,6 +19,12 @@ pub struct AgentConfig {
     pub id: Option<String>,
     pub log_level: Option<String>,
     pub initial_goals: Option<String>,
+    #[serde(default = "default_reasoning_interval_secs")]
+    pub reasoning_interval_secs: u64,
+}
+
+fn default_reasoning_interval_secs() -> u64 {
+    10
 }
 
 impl Config {
@@ -54,6 +60,7 @@ impl Default for Config {
                 id: Some("replicante-001".to_string()),
                 log_level: Some("info".to_string()),
                 initial_goals: None,
+                reasoning_interval_secs: 10,
             },
             llm: LLMConfig {
                 provider: std::env::var("LLM_PROVIDER").unwrap_or_else(|_| "anthropic".to_string()),
