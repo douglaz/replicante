@@ -244,6 +244,12 @@ impl MockLLMProvider {
     }
 }
 
+impl Default for MockLLMProvider {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[async_trait]
 impl LLMProvider for MockLLMProvider {
     async fn complete(&self, _prompt: &str) -> Result<String> {
