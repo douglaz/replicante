@@ -127,6 +127,50 @@ The static binary:
 - Uses rustls (no OpenSSL needed)
 - Is optimized for size (~10-20MB)
 
+## Development
+
+### Setup
+
+Git hooks are **automatically configured** when entering the nix development environment:
+
+```bash
+# Enter dev environment (auto-configures Git hooks)
+nix develop
+```
+
+For non-nix users, manually configure hooks:
+```bash
+git config core.hooksPath .githooks
+```
+
+### Code Quality
+
+#### Automated Checks
+- **pre-commit**: Runs `cargo fmt --check` to ensure code is formatted
+- **pre-push**: Runs both `cargo fmt --check` and `cargo clippy -- -D warnings`
+
+#### Manual Checks
+```bash
+# Format code
+cargo fmt
+
+# Run linter
+cargo clippy
+
+# Run tests
+cargo test
+```
+
+#### Managing Hooks
+```bash
+# Bypass hooks temporarily (not recommended)
+git commit --no-verify
+git push --no-verify
+
+# Disable hooks
+git config --unset core.hooksPath
+```
+
 ## MCP Tools
 
 The agent can discover and use tools via MCP servers:
