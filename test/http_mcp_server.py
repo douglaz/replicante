@@ -25,7 +25,7 @@ class HttpMCPServer:
             {
                 "name": "fetch_url",
                 "description": "Fetch content from a URL",
-                "input_schema": {
+                "inputSchema": {
                     "type": "object",
                     "properties": {
                         "url": {"type": "string", "description": "The URL to fetch"}
@@ -36,7 +36,7 @@ class HttpMCPServer:
             {
                 "name": "check_weather",
                 "description": "Get current weather (mock data)",
-                "input_schema": {
+                "inputSchema": {
                     "type": "object",
                     "properties": {
                         "city": {"type": "string", "description": "City name"}
@@ -47,7 +47,7 @@ class HttpMCPServer:
             {
                 "name": "get_time",
                 "description": "Get current time in various timezones",
-                "input_schema": {
+                "inputSchema": {
                     "type": "object",
                     "properties": {
                         "timezone": {"type": "string", "description": "Timezone (e.g., UTC, EST, PST)"}
@@ -57,7 +57,7 @@ class HttpMCPServer:
             {
                 "name": "calculate",
                 "description": "Perform basic calculations",
-                "input_schema": {
+                "inputSchema": {
                     "type": "object",
                     "properties": {
                         "expression": {"type": "string", "description": "Math expression to evaluate"}
@@ -99,14 +99,14 @@ class HttpMCPServer:
             "jsonrpc": "2.0",
             "id": request_id,
             "result": {
-                "protocol_version": "2024-11-05",
-                "server_info": {
+                "protocolVersion": "2024-11-05",
+                "serverInfo": {
                     "name": "http-mcp-server",
                     "version": "1.0.0"
                 },
                 "capabilities": {
                     "tools": {
-                        "list_changed": True
+                        "listChanged": True
                     }
                 }
             }

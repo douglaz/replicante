@@ -1,289 +1,325 @@
-# Running Replicante with Ollama - Testing Enhanced Features
+# Running a Practical AI Assistant with Ollama
 
-This guide demonstrates how to run Replicante locally with Ollama to test the new MCP integration enhancements and learning algorithms.
+This guide shows how to run Replicante as a fully functional AI assistant using Ollama for local LLM inference. The assistant can perform calculations, provide time information, check weather, and fetch web data.
 
-## Prerequisites
+## Quick Start with Docker (Recommended)
 
-### 1. Install Ollama
+The easiest way to get a working AI assistant is using Docker Compose:
+
+### 1. Prerequisites
+
 ```bash
-# Install Ollama if not already installed
+# Install Docker and Docker Compose
+# On Ubuntu/Debian:
+sudo apt update && sudo apt install docker.io docker-compose
+
+# On macOS:
+brew install docker docker-compose
+
+# Start Docker service
+sudo systemctl start docker  # Linux
+# Docker Desktop should be running on macOS/Windows
+```
+
+### 2. One-Command Setup
+
+```bash
+# Clone and start the complete stack
+git clone https://github.com/douglaz/replicante
+cd replicante
+
+# Start Ollama + Replicante + Tools
+docker-compose -f docker-compose.ollama.yml up -d
+
+# Pull a model (first time only)
+docker exec replicante-ollama ollama pull llama3.2:3b
+
+# Watch the assistant work
+docker-compose -f docker-compose.ollama.yml logs -f replicante
+```
+
+### 3. What You'll See
+
+The AI assistant will start reasoning and performing tasks:
+
+```
+INFO replicante: Agent ID: replicante-ollama-docker
+INFO replicante: Starting autonomous operation...
+INFO replicante: Observing environment...
+INFO replicante: Thinking about current situation...
+INFO replicante: I can help users with calculations, time information, and web requests
+INFO replicante: Executing action: test_calculator_tool
+INFO replicante: Successfully performed calculation: 123 + 456 = 579
+```
+
+## Alternative: Nix-based Setup
+
+For development or if you prefer Nix:
+
+### 1. Start Ollama
+
+```bash
+# Install Ollama if not available
 curl -fsSL https://ollama.ai/install.sh | sh
 
 # Start Ollama service
-ollama serve  # Run in a separate terminal
-```
+ollama serve &
 
-### 2. Pull a Model
-```bash
-# Recommended: Llama 3.2 3B (fast, 2GB download)
+# Pull a model
 ollama pull llama3.2:3b
-
-# Alternative models:
-ollama pull llama2:7b     # Better reasoning, slower
-ollama pull mistral:7b    # Good balance
-ollama pull phi3:mini     # Very fast, smaller
 ```
 
-## Quick Start with Enhanced Features
-
-### 1. Use the Example Configuration
-
-We provide a pre-configured example that showcases the new features:
+### 2. Run with Nix
 
 ```bash
-# Copy the example configuration
+# Enter development environment
+nix develop
+
+# Use the working configuration
 cp config-ollama-example.toml config.toml
 
-# Run the agent
-cargo run --release
+# Start the assistant
+nix develop -c cargo run --release
 ```
 
-### 2. What You'll See
+## What the Assistant Can Do
 
-The enhanced features in action:
+The AI assistant provides these practical capabilities:
 
-#### Retry Logic
-```
-INFO replicante::mcp: Starting MCP server process: filesystem-mock
-ERROR replicante::mcp: Failed to start MCP server filesystem (attempt 1/3): Failed to spawn
-INFO replicante::mcp: Starting MCP server process: filesystem-mock  
-ERROR replicante::mcp: Failed to start MCP server filesystem (attempt 2/3): Failed to spawn
-INFO replicante::mcp: Starting MCP server process: filesystem-mock
-ERROR replicante::mcp: Failed to start MCP server filesystem (attempt 3/3): Failed to spawn
-WARN replicante::mcp: Giving up on MCP server filesystem after 3 attempts
-```
+### 🧮 **Mathematical Calculations**
+- Basic arithmetic: addition, subtraction, multiplication, division
+- Complex expressions: `(15 * 7) + (100 / 4)`
+- Mathematical functions and operations
 
-#### Health Monitoring
-The agent will periodically check server health (every 60 seconds by default) and attempt to restart unhealthy servers:
-```
-WARN replicante::mcp: Health check failed for filesystem: timeout
-WARN replicante::mcp: Server filesystem appears unhealthy after 3 consecutive failures
-INFO replicante::mcp: Attempting to restart MCP server
-```
+### 🕐 **Time Services**
+- Current time in any timezone: UTC, EST, PST, CET, JST
+- Time conversions and scheduling assistance
+- Calendar calculations
 
-#### Learning System
-Watch the agent learn from its actions:
-```
-INFO replicante: Learning from 5 recent decisions
-INFO replicante: Found learned pattern with 0.85 confidence: explore
-INFO replicante: Using learned action based on past success
-```
+### 🌤️ **Weather Information**
+- Current weather conditions (simulated for demo)
+- Temperature and weather status for any city
+- Weather-based recommendations
 
-## Monitoring the Learning System
+### 🌐 **Web Data Fetching**
+- Fetch content from safe web APIs
+- Data retrieval from trusted sources
+- Web service integration
 
-### View Learning Metrics
+### 💬 **General Assistance**
+- Answer questions using local LLM reasoning
+- Process and echo information
+- Provide helpful responses
+
+## Interacting with the Assistant
+
+### Viewing Assistant Activity
+
 ```bash
-# Check what patterns the agent has learned
-sqlite3 replicante.db "SELECT * FROM action_patterns ORDER BY confidence DESC;"
+# Watch logs in real-time (Docker)
+docker-compose -f docker-compose.ollama.yml logs -f replicante
 
-# View learning metrics
-sqlite3 replicante.db "SELECT * FROM learning_metrics;"
+# Watch logs (Nix)
+tail -f logs/replicante.log
 
-# See decision history with patterns
-sqlite3 replicante.db "SELECT thought, action FROM decisions WHERE thought LIKE '%[learned]%';"
+# Check what the assistant learned
+sqlite3 replicante-ollama.db "SELECT * FROM memory;"
 ```
 
-### Example Output
-After running for a few minutes, you'll see:
-- **Action patterns**: Context-based patterns with confidence scores
-- **Learning metrics**: Success rates for decisions and tools
-- **Adapted behavior**: The agent using successful patterns more frequently
+### Example Interactions
 
-## Custom Configuration
+The assistant autonomously:
 
-Create your own `config.toml` to test specific scenarios:
+1. **Tests its tools**: Performs sample calculations to verify functionality
+2. **Demonstrates capabilities**: Shows what it can do with available tools
+3. **Learns from results**: Remembers successful patterns
+4. **Provides services**: Ready to help with user queries
+
+### Direct Database Queries
+
+```bash
+# See recent thoughts and actions
+sqlite3 replicante-ollama.db "
+  SELECT datetime(created_at) as time, thought, action 
+  FROM decisions 
+  ORDER BY created_at DESC 
+  LIMIT 10;
+"
+
+# Check tool usage statistics
+sqlite3 replicante-ollama.db "
+  SELECT tool_name, usage_count, success_rate 
+  FROM capabilities 
+  ORDER BY usage_count DESC;
+"
+```
+
+## Customizing the Assistant
+
+### Change Assistant Goals
+
+Edit the configuration to focus on specific tasks:
 
 ```toml
-database_path = "replicante-ollama.db"
+# In config.toml or docker volume
+initial_goals = """
+You are a specialized assistant for:
+1. Mathematical tutoring and calculations
+2. Scheduling and time management
+3. Weather-based planning
+4. Research and information gathering
+
+Focus on educational assistance and productivity tools.
+"""
+```
+
+### Add More Tools
+
+Extend the assistant's capabilities by adding MCP servers:
+
+```toml
+# Add a new tool server
+[[mcp_servers]]
+name = "custom-tools"
+transport = "stdio"
+command = "python"
+args = ["-u", "/path/to/your_mcp_server.py"]
+retry_attempts = 3
+retry_delay_ms = 1000
+health_check_interval_secs = 60
+```
+
+### Adjust Behavior
+
+Tune the assistant's personality and response style:
+
+```toml
+[llm]
+temperature = 0.3  # More focused responses
+# or
+temperature = 0.9  # More creative responses
 
 [agent]
-id = "replicante-ollama-test"
-log_level = "info"
-reasoning_interval_secs = 10
-initial_goals = """
-Your primary goals are:
-1. Test the learning system by exploring available tools
-2. Execute tools and track their success/failure patterns
-3. Use learned patterns to improve decision-making
-4. Monitor your own health metrics
-5. Demonstrate retry and health monitoring features
-"""
-
-[llm]
-provider = "ollama"
-model = "llama3.2:3b"
-api_url = "http://localhost:11434"
-temperature = 0.7
-max_tokens = 2000
-
-# MCP servers with enhanced configuration
-[[mcp_servers]]
-name = "test_server"
-transport = "stdio"
-command = "echo"
-args = ["test"]
-retry_attempts = 3              # Will retry 3 times
-retry_delay_ms = 1000           # Wait 1 second between retries
-health_check_interval_secs = 30 # Check health every 30 seconds
+reasoning_interval_secs = 10  # More frequent thinking
+# or  
+reasoning_interval_secs = 60  # Less frequent, more deliberate
 ```
 
-## Testing Specific Features
+## Monitoring and Management
 
-### 1. Test Retry Logic
-Add a server that will fail initially:
-```toml
-[[mcp_servers]]
-name = "flaky_server"
-transport = "stdio"
-command = "sh"
-args = ["-c", "exit 1"]  # Always fails
-retry_attempts = 5
-retry_delay_ms = 2000
-```
-
-### 2. Test Learning System
-Set goals that encourage pattern learning:
-```toml
-initial_goals = """
-1. Try the same action multiple times
-2. Track which actions succeed most often
-3. Prefer actions with higher success rates
-4. Build a knowledge base of effective strategies
-"""
-```
-
-### 3. Test Health Monitoring
-Run the agent and kill an MCP server process:
-```bash
-# In another terminal, find and kill an MCP process
-ps aux | grep mcp
-kill -9 <pid>
-# Watch the agent detect and attempt to restart it
-```
-
-## Docker Testing
-
-To test in Docker with Ollama on the host:
+### Health Checks
 
 ```bash
-# Build the Docker image
-docker build -t replicante-test .
+# Check all services (Docker)
+docker-compose -f docker-compose.ollama.yml ps
 
-# Run with host networking (easiest for Ollama access)
-docker run -it --network host \
-  -v $(pwd)/config-ollama-example.toml:/config/config.toml \
-  -v /tmp/replicante-data:/data \
-  -e RUST_LOG=info \
-  replicante-test
+# Check Ollama specifically
+curl http://localhost:11434/api/tags
 
-# Or use bridge networking with explicit Ollama URL
-docker run -it \
-  -v $(pwd)/config-ollama-example.toml:/config/config.toml \
-  -v /tmp/replicante-data:/data \
-  -e RUST_LOG=info \
-  -e OLLAMA_HOST=http://172.17.0.1:11434 \
-  replicante-test
+# Test assistant health
+docker exec replicante-agent echo "healthy"
 ```
 
-## Performance Monitoring
+### Performance Monitoring
 
-### Check Agent Performance
 ```bash
-# View decision success rate over time
-sqlite3 replicante.db "
-  SELECT 
-    datetime(created_at) as time,
-    COUNT(*) as decisions,
-    SUM(CASE WHEN result IS NOT NULL THEN 1 ELSE 0 END) as completed
-  FROM decisions 
-  GROUP BY date(created_at)
-  ORDER BY time DESC;
-"
+# Resource usage
+docker stats replicante-ollama replicante-agent
 
-# View tool success rates
-sqlite3 replicante.db "
-  SELECT 
-    tool_name, 
-    success_rate,
-    datetime(last_used) as last_used
-  FROM capabilities 
-  ORDER BY success_rate DESC;
-"
+# Service logs
+docker-compose -f docker-compose.ollama.yml logs ollama
+docker-compose -f docker-compose.ollama.yml logs replicante
 ```
 
-### Watch Real-time Learning
+### Stopping and Restarting
+
 ```bash
-# Monitor learning in real-time
-watch -n 5 'sqlite3 replicante.db "
-  SELECT metric_name, metric_value 
-  FROM learning_metrics 
-  ORDER BY updated_at DESC 
-  LIMIT 10;
-"'
+# Stop all services
+docker-compose -f docker-compose.ollama.yml down
+
+# Stop just the assistant (keep Ollama running)
+docker-compose -f docker-compose.ollama.yml stop replicante
+
+# Restart with new configuration
+docker-compose -f docker-compose.ollama.yml up -d replicante
 ```
 
 ## Troubleshooting
 
-### Ollama Connection Issues
+### Ollama Issues
+
 ```bash
-# Verify Ollama is running
+# Check if Ollama is accessible
 curl http://localhost:11434/api/tags
 
 # Check available models
-ollama list
+docker exec replicante-ollama ollama list
 
-# Test model directly
-ollama run llama3.2:3b "Hello, are you working?"
+# Pull a different model
+docker exec replicante-ollama ollama pull mistral:7b
 ```
 
-### Learning System Not Working
+### Assistant Not Responding
+
 ```bash
-# Check if tables were created
-sqlite3 replicante.db ".tables"
-# Should show: action_patterns capabilities decisions learning_metrics memory
+# Check assistant logs
+docker-compose -f docker-compose.ollama.yml logs replicante
 
-# Verify data is being recorded
-sqlite3 replicante.db "SELECT COUNT(*) FROM action_patterns;"
+# Restart the assistant
+docker-compose -f docker-compose.ollama.yml restart replicante
+
+# Check database
+sqlite3 replicante-ollama.db "SELECT COUNT(*) FROM decisions;"
 ```
 
-### High Memory Usage
+### Tool Connection Problems
+
+```bash
+# Check MCP tools container
+docker-compose -f docker-compose.ollama.yml logs mcp-tools
+
+# Test tools manually
+docker exec replicante-mcp-tools python /app/http_mcp_server.py
+```
+
+### Memory/Performance Issues
+
 ```bash
 # Use a smaller model
-ollama pull llama3.2:1b  # Tiny model
-ollama pull gemma:2b      # Google's small model
+docker exec replicante-ollama ollama pull llama3.2:1b
 
-# Or limit Ollama memory
-OLLAMA_MAX_MEMORY=4GB ollama serve
+# Reduce assistant frequency
+# Edit config.toml: reasoning_interval_secs = 120
+
+# Limit Docker resources in docker-compose.ollama.yml
 ```
 
-## Expected Results
+## What Makes This Practical
 
-After running for 5-10 minutes with the enhanced features:
+Unlike technical demos, this setup provides:
 
-1. **Retry Statistics**: You'll see multiple retry attempts in logs with configured delays
-2. **Health Checks**: Periodic health check logs (based on configured intervals)
-3. **Learning Data**:
-   - 10-20 action patterns recorded
-   - 5-10 learning metrics tracked
-   - Confidence scores improving for successful patterns
-4. **Adaptive Behavior**: The agent will start preferring actions that have worked before
+✅ **Real Functionality**: Working calculator, time service, weather simulation  
+✅ **Autonomous Operation**: The assistant decides what to do without prompting  
+✅ **Persistent Learning**: Remembers what works across restarts  
+✅ **Easy Deployment**: One command Docker setup  
+✅ **Local Privacy**: Everything runs on your machine  
+✅ **Extensible**: Easy to add new tools and capabilities  
 
 ## Next Steps
 
-1. **Experiment with Goals**: Modify `initial_goals` to test different learning scenarios
-2. **Add Real MCP Servers**: Replace mock servers with actual implementations
-3. **Tune Parameters**: Adjust retry attempts, delays, and health check intervals
-4. **Extended Running**: Let it run for hours to see long-term learning patterns
-5. **Multiple Agents**: Run multiple instances to see if they learn differently
+1. **Extend Tools**: Add file system access, email, or API integrations
+2. **Custom Models**: Train specialized models for your use case
+3. **Multiple Agents**: Run several assistants with different specializations
+4. **Production Deploy**: Use the static binary for server deployment
+5. **Integration**: Connect to external services and databases
 
 ## Summary
 
-This example demonstrates:
-- ✅ Configurable retry logic with attempts and delays
-- ✅ Health monitoring with automatic recovery
-- ✅ Pattern recognition and learning system
-- ✅ Confidence-based decision making
-- ✅ Performance metrics tracking
-- ✅ Local LLM integration via Ollama
+This creates a fully autonomous AI assistant that:
+- Runs entirely on your local machine
+- Provides useful, practical services
+- Learns and improves over time
+- Requires minimal setup and maintenance
+- Can be extended with additional capabilities
 
-The agent is now capable of learning from experience and adapting its behavior based on what works!
+The assistant demonstrates true autonomous AI - it decides its own actions, learns from experience, and provides value without constant human direction.

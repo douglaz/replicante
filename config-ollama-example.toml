@@ -1,29 +1,37 @@
-# Example configuration for testing Replicante with Ollama
-# This configuration demonstrates the enhanced MCP features and learning system
+# Example configuration for running Replicante with Ollama
+# This configuration creates a practical, working AI assistant
 
 # Database location - will be created if it doesn't exist
 database_path = "replicante-ollama.db"
 
 [agent]
 # Unique identifier for this agent instance
-id = "replicante-ollama-demo"
+id = "replicante-ollama-assistant"
 
 # Logging level: trace, debug, info, warn, error
 log_level = "info"
 
 # Time between reasoning cycles (seconds)
-reasoning_interval_secs = 10
+reasoning_interval_secs = 20
 
-# Initial goals that showcase the new features
+# Practical goals for a useful AI assistant
 initial_goals = """
-Your primary goals are:
-1. Explore and discover available tools through the MCP system
-2. Test tools multiple times to build confidence patterns
-3. Learn from successes and failures to improve decision-making
-4. Track your performance metrics and adapt strategies
-5. Demonstrate resilience by handling tool failures gracefully
-6. Build a knowledge base of what works and what doesn't
-7. Use learned patterns to become more efficient over time
+You are a helpful AI assistant with access to useful tools. Your goals are:
+
+1. **Provide Information**: Answer questions and help users with calculations, time, and weather
+2. **Use Tools Effectively**: Leverage available tools to give accurate, helpful responses
+3. **Learn from Experience**: Remember what works to improve future interactions
+4. **Stay Helpful**: Focus on providing value through useful services
+5. **Be Reliable**: Maintain consistent operation and restart tools when needed
+
+Available capabilities:
+- Mathematical calculations (addition, subtraction, multiplication, division, etc.)
+- Time information across different timezones
+- Weather information (simulated data for demonstration)
+- Web data fetching from safe sources
+- Simple data processing and echo services
+
+Always aim to be helpful, accurate, and efficient in your responses.
 """
 
 [llm]
@@ -44,47 +52,27 @@ temperature = 0.7
 max_tokens = 2000
 
 # MCP (Model Context Protocol) Servers
-# These demonstrate the enhanced retry and health monitoring features
+# Working tools that provide real functionality
 
-# Example 1: Filesystem mock with moderate retry settings
+# HTTP Tools Server - provides web requests, calculations, time, weather
 [[mcp_servers]]
-name = "filesystem-mock"
+name = "http-tools"
 transport = "stdio"
-command = "echo"  # Replace with actual mcp-server-filesystem when available
-args = ["filesystem simulation"]
-retry_attempts = 3              # Try 3 times before giving up
-retry_delay_ms = 1000          # Wait 1 second between attempts
-health_check_interval_secs = 60 # Check health every minute
+command = "python"
+args = ["-u", "test/http_mcp_server.py"]
+retry_attempts = 3
+retry_delay_ms = 1500
+health_check_interval_secs = 60
 
-# Example 2: HTTP mock with faster retry for testing
+# Basic Tools Server - provides echo and simple arithmetic
 [[mcp_servers]]
-name = "http-mock"
+name = "basic-tools"
 transport = "stdio"
-command = "echo"  # Replace with actual mcp-server-http when available
-args = ["http simulation"]
-retry_attempts = 2              # Fewer retries for HTTP
-retry_delay_ms = 500           # Shorter delay
-health_check_interval_secs = 45 # More frequent health checks
-
-# Example 3: Intentionally failing server to demonstrate retry logic
-[[mcp_servers]]
-name = "test-failure"
-transport = "stdio"
-command = "false"  # This will always fail
-args = []
-retry_attempts = 5              # Will retry 5 times
-retry_delay_ms = 2000          # 2 second delay between attempts
-health_check_interval_secs = 120 # Less frequent checks for known failures
-
-# Example 4: Quick echo server for basic functionality
-[[mcp_servers]]
-name = "echo-test"
-transport = "stdio"
-command = "echo"
-args = ["MCP Echo Test"]
-retry_attempts = 1              # Minimal retries for simple commands
-retry_delay_ms = 100           # Very short delay
-health_check_interval_secs = 300 # Infrequent checks for stable servers
+command = "python"
+args = ["-u", "test/mock_mcp_server.py"]
+retry_attempts = 2
+retry_delay_ms = 1000
+health_check_interval_secs = 120
 
 # Add more MCP servers as they become available:
 # [[mcp_servers]]

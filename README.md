@@ -39,21 +39,32 @@ export OPENAI_API_KEY=sk-...
 cargo run --release
 ```
 
-### Local Testing with Ollama
+### Local AI Assistant with Ollama
 
-For local testing with Ollama (no API keys required):
+Run a fully functional AI assistant locally (no API keys required):
 
+**Docker (Recommended):**
 ```bash
-# Install and start Ollama
-ollama serve
-ollama pull llama3.2:3b
+# One-command setup
+nix run .#ollama-setup
 
-# Run with example configuration
-cp config-ollama-example.toml config.toml
-cargo run --release
+# Or manually:
+docker-compose -f docker-compose.ollama.yml up -d
+docker exec replicante-ollama ollama pull llama3.2:3b
 ```
 
-See [OLLAMA_EXAMPLE.md](OLLAMA_EXAMPLE.md) for detailed instructions on testing the enhanced MCP features and learning system locally.
+**Nix Development:**
+```bash
+# Quick start
+nix run .#ollama-nix
+
+# Or step by step:
+ollama serve && ollama pull llama3.2:3b
+cp config-ollama-example.toml config.toml
+nix develop -c cargo run --release
+```
+
+See [OLLAMA_EXAMPLE.md](OLLAMA_EXAMPLE.md) for complete setup instructions and details on what the AI assistant can do (calculations, time, weather, web requests).
 
 ## Configuration
 
