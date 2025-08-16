@@ -739,32 +739,23 @@ impl MCPClient {
             bail!("Invalid tool execution response")
         }
     }
-
-    async fn cleanup_server(server: Arc<Mutex<MCPServer>>) {
-        let mut server_guard = server.lock().await;
-
-        if let Some(mut process) = server_guard.process.take() {
-            info!("Shutting down MCP server: {name}", name = server_guard.name);
-
-            // Try graceful shutdown first
-            if let Err(e) = process.kill().await {
-                error!("Failed to kill MCP server process: {e}");
-            }
-        }
-    }
 }
 
 impl Drop for MCPClient {
     fn drop(&mut self) {
-        // Clean up any running MCP server processes
+        // Clean up any running MCP server processes without blocking
         for server in &self.servers {
-            let server_clone = server.clone();
-            // Use block_on since drop is not async
-            let _ = std::thread::spawn(move || {
-                let rt = tokio::runtime::Runtime::new().unwrap();
-                rt.block_on(MCPClient::cleanup_server(server_clone));
-            })
-            .join();
+            // Use try_lock to avoid potential deadlocks and hanging
+            if let Ok(mut server_guard) = server.try_lock()
+                && let Some(mut process) = server_guard.process.take()
+            {
+                // Use start_kill() which is non-blocking, let OS handle cleanup
+                let _ = process.start_kill();
+                debug!(
+                    "Initiated shutdown of MCP server: {name}",
+                    name = server_guard.name
+                );
+            }
         }
     }
 }
