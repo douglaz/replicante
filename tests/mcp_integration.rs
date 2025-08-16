@@ -10,7 +10,18 @@ fn target_binary_path(bin_name: &str) -> String {
     path.push("target");
     path.push("debug");
     path.push(bin_name);
-    path.to_string_lossy().to_string()
+
+    let path_str = path.to_string_lossy().to_string();
+
+    // Check if binary exists and provide helpful error if not
+    if !path.exists() {
+        eprintln!(
+            "Warning: Binary {} not found at {}. Make sure to run 'cargo build --bins' first.",
+            bin_name, path_str
+        );
+    }
+
+    path_str
 }
 
 #[tokio::test]
@@ -35,213 +46,225 @@ async fn test_echo_server() -> Result<()> {
 
 #[tokio::test]
 async fn test_mock_server_full_flow() -> Result<()> {
-    let configs = vec![MCPServerConfig {
-        name: "mock".to_string(),
-        transport: "stdio".to_string(),
-        command: target_binary_path("mock-mcp-server"),
-        args: vec![],
-        retry_attempts: 2,
-        retry_delay_ms: 500,
-        health_check_interval_secs: 30,
-    }];
+    // Wrap entire test with timeout to prevent hanging
+    timeout(Duration::from_secs(30), async {
+        let configs = vec![MCPServerConfig {
+            name: "mock".to_string(),
+            transport: "stdio".to_string(),
+            command: target_binary_path("mock-mcp-server"),
+            args: vec![],
+            retry_attempts: 2,
+            retry_delay_ms: 500,
+            health_check_interval_secs: 30,
+        }];
 
-    // Create client with timeout
-    let client = timeout(Duration::from_secs(5), MCPClient::new(&configs)).await??;
+        // Create client with timeout
+        let client = timeout(Duration::from_secs(5), MCPClient::new(&configs)).await??;
 
-    // Wait a bit for initialization
-    tokio::time::sleep(Duration::from_millis(500)).await;
+        // Wait a bit for initialization
+        tokio::time::sleep(Duration::from_millis(500)).await;
 
-    // List tools
-    let tools = client.list_tools().await?;
-    assert!(!tools.is_empty(), "Should have discovered tools");
+        // List tools
+        let tools = client.list_tools().await?;
+        assert!(!tools.is_empty(), "Should have discovered tools");
 
-    // Check for expected tools
-    assert!(
-        tools.contains(&"mock:echo".to_string()),
-        "Should have echo tool"
-    );
-    assert!(
-        tools.contains(&"mock:add".to_string()),
-        "Should have add tool"
-    );
-    assert!(
-        tools.contains(&"mock:get_time".to_string()),
-        "Should have get_time tool"
-    );
+        // Check for expected tools
+        assert!(
+            tools.contains(&"mock:echo".to_string()),
+            "Should have echo tool"
+        );
+        assert!(
+            tools.contains(&"mock:add".to_string()),
+            "Should have add tool"
+        );
+        assert!(
+            tools.contains(&"mock:get_time".to_string()),
+            "Should have get_time tool"
+        );
 
-    // Test echo tool
-    let result = client
-        .use_tool(
-            "mock:echo",
-            serde_json::json!({
-                "message": "Hello, MCP!"
-            }),
-        )
-        .await?;
+        // Test echo tool
+        let result = client
+            .use_tool(
+                "mock:echo",
+                serde_json::json!({
+                    "message": "Hello, MCP!"
+                }),
+            )
+            .await?;
 
-    assert!(result["success"].as_bool().unwrap_or(false));
-    let content = result["content"].as_str().unwrap_or("");
-    assert!(
-        content.contains("Hello, MCP!"),
-        "Echo should return our message"
-    );
+        assert!(result["success"].as_bool().unwrap_or(false));
+        let content = result["content"].as_str().unwrap_or("");
+        assert!(
+            content.contains("Hello, MCP!"),
+            "Echo should return our message"
+        );
 
-    // Test add tool
-    let result = client
-        .use_tool(
-            "mock:add",
-            serde_json::json!({
-                "a": 5,
-                "b": 3
-            }),
-        )
-        .await?;
+        // Test add tool
+        let result = client
+            .use_tool(
+                "mock:add",
+                serde_json::json!({
+                    "a": 5,
+                    "b": 3
+                }),
+            )
+            .await?;
 
-    assert!(result["success"].as_bool().unwrap_or(false));
-    let content = result["content"].as_str().unwrap_or("");
-    assert!(content.contains("8"), "Add should return 5 + 3 = 8");
+        assert!(result["success"].as_bool().unwrap_or(false));
+        let content = result["content"].as_str().unwrap_or("");
+        assert!(content.contains("8"), "Add should return 5 + 3 = 8");
 
-    // Test get_time tool
-    let result = client
-        .use_tool("mock:get_time", serde_json::json!({}))
-        .await?;
+        // Test get_time tool
+        let result = client
+            .use_tool("mock:get_time", serde_json::json!({}))
+            .await?;
 
-    assert!(result["success"].as_bool().unwrap_or(false));
-    let content = result["content"].as_str().unwrap_or("");
-    assert!(
-        content.contains("Current time"),
-        "Should return current time"
-    );
+        assert!(result["success"].as_bool().unwrap_or(false));
+        let content = result["content"].as_str().unwrap_or("");
+        assert!(
+            content.contains("Current time"),
+            "Should return current time"
+        );
 
-    Ok(())
+        Ok(())
+    })
+    .await?
 }
 
 #[tokio::test]
 async fn test_multiple_servers() -> Result<()> {
-    let configs = vec![
-        MCPServerConfig {
-            name: "mock1".to_string(),
-            transport: "stdio".to_string(),
-            command: target_binary_path("mock-mcp-server"),
-            args: vec![],
-            retry_attempts: 2,
-            retry_delay_ms: 500,
-            health_check_interval_secs: 30,
-        },
-        MCPServerConfig {
-            name: "mock2".to_string(),
-            transport: "stdio".to_string(),
-            command: target_binary_path("mock-mcp-server"),
-            args: vec![],
-            retry_attempts: 2,
-            retry_delay_ms: 500,
-            health_check_interval_secs: 30,
-        },
-    ];
+    // Wrap entire test with timeout to prevent hanging
+    timeout(Duration::from_secs(30), async {
+        let configs = vec![
+            MCPServerConfig {
+                name: "mock1".to_string(),
+                transport: "stdio".to_string(),
+                command: target_binary_path("mock-mcp-server"),
+                args: vec![],
+                retry_attempts: 2,
+                retry_delay_ms: 500,
+                health_check_interval_secs: 30,
+            },
+            MCPServerConfig {
+                name: "mock2".to_string(),
+                transport: "stdio".to_string(),
+                command: target_binary_path("mock-mcp-server"),
+                args: vec![],
+                retry_attempts: 2,
+                retry_delay_ms: 500,
+                health_check_interval_secs: 30,
+            },
+        ];
 
-    let client = timeout(Duration::from_secs(5), MCPClient::new(&configs)).await??;
+        let client = timeout(Duration::from_secs(5), MCPClient::new(&configs)).await??;
 
-    // Wait for initialization
-    tokio::time::sleep(Duration::from_millis(500)).await;
+        // Wait for initialization
+        tokio::time::sleep(Duration::from_millis(500)).await;
 
-    let tools = client.list_tools().await?;
+        let tools = client.list_tools().await?;
 
-    // Should have tools from both servers
-    assert!(tools.contains(&"mock1:echo".to_string()));
-    assert!(tools.contains(&"mock2:echo".to_string()));
+        // Should have tools from both servers
+        assert!(tools.contains(&"mock1:echo".to_string()));
+        assert!(tools.contains(&"mock2:echo".to_string()));
 
-    Ok(())
+        Ok(())
+    })
+    .await?
 }
 
 #[tokio::test]
 async fn test_http_mcp_server() -> Result<()> {
-    let configs = vec![MCPServerConfig {
-        name: "http".to_string(),
-        transport: "stdio".to_string(),
-        command: target_binary_path("http-mcp-server"),
-        args: vec![],
-        retry_attempts: 2,
-        retry_delay_ms: 500,
-        health_check_interval_secs: 30,
-    }];
+    // Wrap entire test with timeout to prevent hanging
+    timeout(Duration::from_secs(30), async {
+        let configs = vec![MCPServerConfig {
+            name: "http".to_string(),
+            transport: "stdio".to_string(),
+            command: target_binary_path("http-mcp-server"),
+            args: vec![],
+            retry_attempts: 2,
+            retry_delay_ms: 500,
+            health_check_interval_secs: 30,
+        }];
 
-    // Create client with timeout
-    let client = timeout(Duration::from_secs(10), MCPClient::new(&configs)).await??;
+        // Create client with timeout
+        let client = timeout(Duration::from_secs(10), MCPClient::new(&configs)).await??;
 
-    // Wait a bit for initialization
-    tokio::time::sleep(Duration::from_millis(500)).await;
+        // Wait a bit for initialization
+        tokio::time::sleep(Duration::from_millis(500)).await;
 
-    // List tools
-    let tools = client.list_tools().await?;
-    assert!(!tools.is_empty(), "Should have discovered tools");
+        // List tools
+        let tools = client.list_tools().await?;
+        assert!(!tools.is_empty(), "Should have discovered tools");
 
-    // Check for expected tools
-    assert!(
-        tools.contains(&"http:fetch_url".to_string()),
-        "Should have fetch_url tool"
-    );
-    assert!(
-        tools.contains(&"http:check_weather".to_string()),
-        "Should have check_weather tool"
-    );
-    assert!(
-        tools.contains(&"http:get_time".to_string()),
-        "Should have get_time tool"
-    );
-    assert!(
-        tools.contains(&"http:calculate".to_string()),
-        "Should have calculate tool"
-    );
+        // Check for expected tools
+        assert!(
+            tools.contains(&"http:fetch_url".to_string()),
+            "Should have fetch_url tool"
+        );
+        assert!(
+            tools.contains(&"http:check_weather".to_string()),
+            "Should have check_weather tool"
+        );
+        assert!(
+            tools.contains(&"http:get_time".to_string()),
+            "Should have get_time tool"
+        );
+        assert!(
+            tools.contains(&"http:calculate".to_string()),
+            "Should have calculate tool"
+        );
 
-    // Test calculate tool
-    let result = client
-        .use_tool(
-            "http:calculate",
-            serde_json::json!({
-                "expression": "15 + 25 * 2"
-            }),
-        )
-        .await?;
+        // Test calculate tool
+        let result = client
+            .use_tool(
+                "http:calculate",
+                serde_json::json!({
+                    "expression": "15 + 25 * 2"
+                }),
+            )
+            .await?;
 
-    assert!(result["success"].as_bool().unwrap_or(false));
-    let content = result["content"].as_str().unwrap_or("");
-    assert!(
-        content.contains("65"),
-        "Calculate should return 15 + 25 * 2 = 65"
-    );
+        assert!(result["success"].as_bool().unwrap_or(false));
+        let content = result["content"].as_str().unwrap_or("");
+        assert!(
+            content.contains("65"),
+            "Calculate should return 15 + 25 * 2 = 65"
+        );
 
-    // Test weather tool
-    let result = client
-        .use_tool(
-            "http:check_weather",
-            serde_json::json!({
-                "city": "London"
-            }),
-        )
-        .await?;
+        // Test weather tool
+        let result = client
+            .use_tool(
+                "http:check_weather",
+                serde_json::json!({
+                    "city": "London"
+                }),
+            )
+            .await?;
 
-    assert!(result["success"].as_bool().unwrap_or(false));
-    let content = result["content"].as_str().unwrap_or("");
-    assert!(
-        content.contains("London"),
-        "Weather should mention the city"
-    );
+        assert!(result["success"].as_bool().unwrap_or(false));
+        let content = result["content"].as_str().unwrap_or("");
+        assert!(
+            content.contains("London"),
+            "Weather should mention the city"
+        );
 
-    // Test time tool
-    let result = client
-        .use_tool(
-            "http:get_time",
-            serde_json::json!({
-                "timezone": "UTC"
-            }),
-        )
-        .await?;
+        // Test time tool
+        let result = client
+            .use_tool(
+                "http:get_time",
+                serde_json::json!({
+                    "timezone": "UTC"
+                }),
+            )
+            .await?;
 
-    assert!(result["success"].as_bool().unwrap_or(false));
-    let content = result["content"].as_str().unwrap_or("");
-    assert!(content.contains("UTC"), "Time should include timezone info");
+        assert!(result["success"].as_bool().unwrap_or(false));
+        let content = result["content"].as_str().unwrap_or("");
+        assert!(content.contains("UTC"), "Time should include timezone info");
 
-    Ok(())
+        Ok(())
+    })
+    .await?
 }
 
 #[tokio::test]

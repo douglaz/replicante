@@ -112,6 +112,12 @@ jobs:
           ${{ runner.os }}-target-test-
           ${{ runner.os }}-target-
     
+    - name: Build all binaries for integration tests
+      run: |
+        echo "Building all binaries (including MCP servers)..."
+        nix develop -c cargo build --bins
+        echo "Binaries built successfully"
+    
     - name: Run tests
       run: |
         echo "Running tests with timeout..."
