@@ -132,6 +132,9 @@ fn verify_mcp_client_exists() {
         transport: "stdio".to_string(),
         command: "echo".to_string(),
         args: vec![],
+        retry_attempts: 3,
+        retry_delay_ms: 1000,
+        health_check_interval_secs: 60,
     };
 
     // Verify MCPClient type exists

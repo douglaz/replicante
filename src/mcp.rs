@@ -1,4 +1,5 @@
 use anyhow::{Context, Result, bail};
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
@@ -7,7 +8,7 @@ use std::sync::Arc;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, Command};
 use tokio::sync::{Mutex, oneshot};
-use tokio::time::{Duration, timeout};
+use tokio::time::{Duration, interval, timeout};
 use tracing::{debug, error, info, warn};
 
 use crate::jsonrpc::{Message, Request, RequestId, Response};
@@ -22,6 +23,22 @@ pub struct MCPServerConfig {
     pub transport: String,
     pub command: String,
     pub args: Vec<String>,
+    #[serde(default = "default_retry_attempts")]
+    pub retry_attempts: u32,
+    #[serde(default = "default_retry_delay_ms")]
+    pub retry_delay_ms: u64,
+    #[serde(default = "default_health_check_interval_secs")]
+    pub health_check_interval_secs: u64,
+}
+
+fn default_retry_attempts() -> u32 {
+    3
+}
+fn default_retry_delay_ms() -> u64 {
+    1000
+}
+fn default_health_check_interval_secs() -> u64 {
+    60
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -35,6 +52,16 @@ pub struct MCPClient {
     servers: Vec<Arc<Mutex<MCPServer>>>,
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub struct MCPServerHealth {
+    pub name: String,
+    pub is_healthy: bool,
+    pub is_initialized: bool,
+    pub last_healthy: Option<DateTime<Utc>>,
+    pub error_count: u32,
+    pub tool_count: usize,
+}
+
 struct MCPServer {
     name: String,
     config: MCPServerConfig,
@@ -43,6 +70,9 @@ struct MCPServer {
     tools: Vec<ToolInfo>,
     pending_requests: HashMap<RequestId, oneshot::Sender<Response>>,
     initialized: bool,
+    last_healthy: Option<DateTime<Utc>>,
+    error_count: u32,
+    tools_cache_time: Option<DateTime<Utc>>,
 }
 
 impl MCPClient {
@@ -60,18 +90,52 @@ impl MCPClient {
                 tools: Vec::new(),
                 pending_requests: HashMap::new(),
                 initialized: false,
+                last_healthy: None,
+                error_count: 0,
+                tools_cache_time: None,
             }));
 
-            // Start the server process
-            if let Err(e) = Self::start_server(server.clone()).await {
-                error!("Failed to start MCP server {name}: {e}", name = config.name);
-                // Continue with other servers even if one fails
+            // Start the server process with retries
+            let mut attempts = 0;
+            let max_attempts = config.retry_attempts;
+            let retry_delay = Duration::from_millis(config.retry_delay_ms);
+
+            loop {
+                attempts += 1;
+                match Self::start_server(server.clone()).await {
+                    Ok(_) => {
+                        info!(
+                            "Successfully started MCP server: {name}",
+                            name = config.name
+                        );
+                        break;
+                    }
+                    Err(e) => {
+                        error!(
+                            "Failed to start MCP server {name} (attempt {attempts}/{max_attempts}): {e}",
+                            name = config.name
+                        );
+
+                        if attempts >= max_attempts {
+                            warn!(
+                                "Giving up on MCP server {name} after {max_attempts} attempts",
+                                name = config.name
+                            );
+                            break;
+                        }
+
+                        tokio::time::sleep(retry_delay).await;
+                    }
+                }
             }
 
             servers.push(server);
         }
 
-        Ok(Self { servers })
+        // Start health monitoring
+        let client = Self { servers };
+        client.start_health_monitoring();
+        Ok(client)
     }
 
     async fn start_server(server: Arc<Mutex<MCPServer>>) -> Result<()> {
@@ -201,9 +265,11 @@ impl MCPClient {
             let notification = Request::notification("initialized", Some(serde_json::json!({})));
             Self::send_notification(stdin.clone(), notification).await?;
 
-            // Mark server as initialized
+            // Mark server as initialized and healthy
             let mut server_guard = server.lock().await;
             server_guard.initialized = true;
+            server_guard.last_healthy = Some(Utc::now());
+            server_guard.error_count = 0;
             drop(server_guard);
 
             // Discover available tools
@@ -230,6 +296,7 @@ impl MCPClient {
             let tools_result: ToolsListResult = serde_json::from_value(result)?;
             let mut server_guard = server.lock().await;
             server_guard.tools = tools_result.tools;
+            server_guard.tools_cache_time = Some(Utc::now());
 
             info!(
                 "Discovered {count} tools from {name}",
@@ -376,6 +443,134 @@ impl MCPClient {
         Ok(all_tools)
     }
 
+    fn start_health_monitoring(&self) {
+        let servers = self.servers.clone();
+
+        tokio::spawn(async move {
+            let mut check_interval = interval(Duration::from_secs(60));
+
+            loop {
+                check_interval.tick().await;
+
+                for server in &servers {
+                    let server_guard = server.lock().await;
+                    let server_name = server_guard.name.clone();
+                    let should_check = server_guard.initialized;
+                    drop(server_guard);
+
+                    if should_check && let Err(e) = Self::health_check(server.clone()).await {
+                        warn!("Health check failed for {server_name}: {e}");
+                    }
+                }
+            }
+        });
+    }
+
+    async fn health_check(server: Arc<Mutex<MCPServer>>) -> Result<()> {
+        let stdin = {
+            let server_guard = server.lock().await;
+            server_guard.stdin.clone()
+        };
+
+        if let Some(stdin) = stdin {
+            // Send a simple ping request to check if server is responsive
+            let request = Request::new("tools/list", Some(serde_json::json!({})));
+
+            match timeout(
+                Duration::from_secs(5),
+                Self::send_request(server.clone(), stdin, request),
+            )
+            .await
+            {
+                Ok(Ok(_response)) => {
+                    let mut server_guard = server.lock().await;
+                    server_guard.last_healthy = Some(Utc::now());
+                    server_guard.error_count = 0;
+                    Ok(())
+                }
+                Ok(Err(e)) => {
+                    let mut server_guard = server.lock().await;
+                    server_guard.error_count += 1;
+
+                    if server_guard.error_count > 3 {
+                        warn!(
+                            "Server {} appears unhealthy after {} consecutive failures",
+                            server_guard.name, server_guard.error_count
+                        );
+
+                        // Try to restart the server
+                        drop(server_guard);
+                        if let Err(restart_err) = Self::restart_server(server.clone()).await {
+                            error!("Failed to restart unhealthy server: {restart_err}");
+                        }
+                    }
+
+                    Err(e)
+                }
+                Err(_) => {
+                    let mut server_guard = server.lock().await;
+                    server_guard.error_count += 1;
+
+                    if server_guard.error_count > 3 {
+                        warn!(
+                            "Server {} appears unhealthy after {} consecutive failures (timeout)",
+                            server_guard.name, server_guard.error_count
+                        );
+
+                        // Try to restart the server
+                        drop(server_guard);
+                        if let Err(e) = Self::restart_server(server.clone()).await {
+                            error!("Failed to restart unhealthy server: {e}");
+                        }
+                    }
+
+                    bail!("Health check timeout")
+                }
+            }
+        } else {
+            bail!("No stdin handle for health check")
+        }
+    }
+
+    async fn restart_server(server: Arc<Mutex<MCPServer>>) -> Result<()> {
+        info!("Attempting to restart MCP server");
+
+        // Clean up existing process
+        {
+            let mut server_guard = server.lock().await;
+            if let Some(mut process) = server_guard.process.take() {
+                let _ = process.kill().await;
+            }
+            server_guard.initialized = false;
+            server_guard.stdin = None;
+            server_guard.tools.clear();
+            server_guard.pending_requests.clear();
+        }
+
+        // Try to start the server again
+        Self::start_server(server).await
+    }
+
+    pub async fn get_health_status(&self) -> Vec<MCPServerHealth> {
+        let mut health_status = Vec::new();
+
+        for server in &self.servers {
+            let server_guard = server.lock().await;
+            health_status.push(MCPServerHealth {
+                name: server_guard.name.clone(),
+                is_healthy: server_guard
+                    .last_healthy
+                    .is_some_and(|t| (Utc::now() - t).num_seconds() < 120),
+                is_initialized: server_guard.initialized,
+                last_healthy: server_guard.last_healthy,
+                error_count: server_guard.error_count,
+                tool_count: server_guard.tools.len(),
+            });
+        }
+
+        health_status
+    }
+
     pub async fn use_tool(&self, name: &str, params: Value) -> Result<Value> {
         debug!("Using tool: {name} with params: {params:?}");
 
@@ -421,6 +616,13 @@ impl MCPClient {
 
         // Parse tool execution response
         if let Some(result) = response.result {
+            // Update last healthy timestamp on successful tool use
+            {
+                let mut server_guard = server.lock().await;
+                server_guard.last_healthy = Some(Utc::now());
+                server_guard.error_count = 0;
+            }
+
             let tool_result: ToolCallResult = serde_json::from_value(result)?;
 
             // Convert tool result to simplified format
@@ -523,6 +725,9 @@ mod tests {
             transport: "stdio".to_string(),
             command: "echo".to_string(),
             args: vec!["test".to_string()],
+            retry_attempts: 1,
+            retry_delay_ms: 100,
+            health_check_interval_secs: 60,
         }];
 
         let client = MCPClient::new(&configs).await?;
@@ -537,6 +742,9 @@ mod tests {
             transport: "stdio".to_string(),
             command: "nonexistent_command_12345".to_string(),
             args: vec![],
+            retry_attempts: 1,
+            retry_delay_ms: 100,
+            health_check_interval_secs: 60,
         }];
 
         // Should not panic, just log error

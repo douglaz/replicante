@@ -1,0 +1,89 @@
+version: '3.8'
+
+# Complete Docker Compose setup for running Replicante with Ollama
+# This creates a fully functional AI agent that can perform useful tasks
+
+services:
+  # Ollama LLM server (using host Ollama instance)
+  # Note: We'll use the host Ollama instance already running on port 11434
+
+  # MCP Tools Server - containerized Python tools
+  mcp-tools:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.mcp-tools
+    container_name: replicante-mcp-tools
+    networks:
+      - replicante-ollama-net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "echo", "healthy"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: '0.5'
+
+  # Replicante AI Agent
+  replicante:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: replicante-agent
+    volumes:
+      - ./config-ollama-docker.toml:/config/config.toml:ro
+      - replicante-data:/data
+      - replicante-logs:/logs
+    networks:
+      - replicante-ollama-net
+    environment:
+      - RUST_LOG=info
+      - DATABASE_PATH=/data/replicante-ollama.db
+      - OLLAMA_HOST=http://172.17.0.1:11434
+    # depends_on:
+    #   mcp-tools:
+    #     condition: service_healthy
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '1.0'
+    healthcheck:
+      test: ["CMD", "echo", "healthy"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  # Web dashboard for monitoring (optional)
+  dashboard:
+    image: nginx:alpine
+    container_name: replicante-dashboard
+    volumes:
+      - ./docker/dashboard:/usr/share/nginx/html:ro
+      - ./docker/nginx.conf:/etc/nginx/nginx.conf:ro
+    ports:
+      - "8080:80"
+    networks:
+      - replicante-ollama-net
+    restart: unless-stopped
+    depends_on:
+      - replicante
+
+networks:
+  replicante-ollama-net:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.30.0.0/16
+
+volumes:
+  ollama-data:
+    driver: local
+  replicante-data:
+    driver: local
+  replicante-logs:
+    driver: local

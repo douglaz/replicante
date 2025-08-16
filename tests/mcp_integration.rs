@@ -20,6 +20,9 @@ async fn test_echo_server() -> Result<()> {
         transport: "stdio".to_string(),
         command: "echo".to_string(),
         args: vec!["test".to_string()],
+        retry_attempts: 1,
+        retry_delay_ms: 100,
+        health_check_interval_secs: 60,
     }];
 
     // This should not hang - echo exits immediately
@@ -47,6 +50,9 @@ async fn test_mock_server_full_flow() -> Result<()> {
         transport: "stdio".to_string(),
         command: "python3".to_string(),
         args: vec!["-u".to_string(), test_path("mock_mcp_server.py")],
+        retry_attempts: 2,
+        retry_delay_ms: 500,
+        health_check_interval_secs: 30,
     }];
 
     // Create client with timeout
@@ -139,12 +145,18 @@ async fn test_multiple_servers() -> Result<()> {
             transport: "stdio".to_string(),
             command: "python3".to_string(),
             args: vec!["-u".to_string(), test_path("mock_mcp_server.py")],
+            retry_attempts: 2,
+            retry_delay_ms: 500,
+            health_check_interval_secs: 30,
         },
         MCPServerConfig {
             name: "mock2".to_string(),
             transport: "stdio".to_string(),
             command: "python3".to_string(),
             args: vec!["-u".to_string(), test_path("mock_mcp_server.py")],
+            retry_attempts: 2,
+            retry_delay_ms: 500,
+            health_check_interval_secs: 30,
         },
     ];
 
@@ -171,6 +183,9 @@ async fn test_server_failure_recovery() -> Result<()> {
             transport: "stdio".to_string(),
             command: "nonexistent_command_xyz".to_string(),
             args: vec![],
+            retry_attempts: 1,
+            retry_delay_ms: 100,
+            health_check_interval_secs: 60,
         },
         // This should work if Python is available
         MCPServerConfig {
@@ -178,6 +193,9 @@ async fn test_server_failure_recovery() -> Result<()> {
             transport: "stdio".to_string(),
             command: "echo".to_string(),
             args: vec!["test".to_string()],
+            retry_attempts: 1,
+            retry_delay_ms: 100,
+            health_check_interval_secs: 60,
         },
     ];
 

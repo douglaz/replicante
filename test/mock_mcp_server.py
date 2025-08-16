@@ -23,7 +23,7 @@ class MockMCPServer:
             {
                 "name": "echo",
                 "description": "Echoes back the input",
-                "input_schema": {
+                "inputSchema": {
                     "type": "object",
                     "properties": {
                         "message": {"type": "string"}
@@ -34,7 +34,7 @@ class MockMCPServer:
             {
                 "name": "add",
                 "description": "Adds two numbers",
-                "input_schema": {
+                "inputSchema": {
                     "type": "object",
                     "properties": {
                         "a": {"type": "number"},
@@ -46,7 +46,10 @@ class MockMCPServer:
             {
                 "name": "get_time",
                 "description": "Gets the current time",
-                "input_schema": None
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {}
+                }
             }
         ]
     
@@ -80,14 +83,14 @@ class MockMCPServer:
             "jsonrpc": "2.0",
             "id": request_id,
             "result": {
-                "protocol_version": "2024-11-05",
-                "server_info": {
+                "protocolVersion": "2024-11-05",
+                "serverInfo": {
                     "name": "mock-mcp-server",
                     "version": "1.0.0"
                 },
                 "capabilities": {
                     "tools": {
-                        "list_changed": True
+                        "listChanged": True
                     }
                 }
             }

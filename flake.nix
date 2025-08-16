@@ -105,6 +105,142 @@
           };
         };
 
+        # Apps for easy running
+        apps = {
+          # Default app: run replicante
+          default = {
+            type = "app";
+            program = "${self.packages.${system}.default}/bin/replicante";
+          };
+          
+          # Ollama setup app
+          ollama-setup = {
+            type = "app";
+            program = pkgs.writeShellScript "ollama-setup" ''
+              set -e
+              
+              echo "🤖 Replicante Ollama Setup"
+              echo "=========================="
+              echo ""
+              
+              # Check if Docker is available
+              if ! command -v docker &> /dev/null; then
+                echo "❌ Docker not found. Please install Docker first."
+                echo "   Ubuntu/Debian: sudo apt install docker.io docker-compose"
+                echo "   macOS: brew install docker docker-compose"
+                exit 1
+              fi
+              
+              # Check if Docker Compose is available
+              if ! command -v docker-compose &> /dev/null; then
+                echo "❌ Docker Compose not found. Please install Docker Compose first."
+                exit 1
+              fi
+              
+              # Check if we're in the right directory
+              if [ ! -f "docker-compose.ollama.yml" ]; then
+                echo "❌ docker-compose.ollama.yml not found."
+                echo "   Please run this from the replicante repository root."
+                exit 1
+              fi
+              
+              echo "✅ Docker and Docker Compose found"
+              echo ""
+              
+              # Check if Ollama is running
+              if curl -s http://localhost:11434/api/tags > /dev/null 2>&1; then
+                echo "✅ Ollama is already running"
+              else
+                echo "🚀 Starting Ollama with Docker Compose..."
+                docker-compose -f docker-compose.ollama.yml up -d ollama
+                
+                echo "⏳ Waiting for Ollama to start..."
+                for i in {1..30}; do
+                  if curl -s http://localhost:11434/api/tags > /dev/null 2>&1; then
+                    echo "✅ Ollama is ready"
+                    break
+                  fi
+                  if [ $i -eq 30 ]; then
+                    echo "❌ Ollama failed to start within 30 seconds"
+                    exit 1
+                  fi
+                  sleep 1
+                done
+              fi
+              
+              echo ""
+              echo "📦 Checking for Llama model..."
+              
+              # Check if we have a model
+              if docker exec replicante-ollama ollama list 2>/dev/null | grep -q "llama3.2:3b"; then
+                echo "✅ Llama 3.2 3B model found"
+              else
+                echo "📥 Downloading Llama 3.2 3B model (this may take a few minutes)..."
+                docker exec replicante-ollama ollama pull llama3.2:3b
+                echo "✅ Model downloaded"
+              fi
+              
+              echo ""
+              echo "🛠️  Starting Replicante assistant..."
+              docker-compose -f docker-compose.ollama.yml up -d
+              
+              echo ""
+              echo "🎉 Setup complete! Your AI assistant is running."
+              echo ""
+              echo "📊 Monitor your assistant:"
+              echo "   docker-compose -f docker-compose.ollama.yml logs -f replicante"
+              echo ""
+              echo "🔍 Check status:"
+              echo "   docker-compose -f docker-compose.ollama.yml ps"
+              echo ""
+              echo "🛑 Stop everything:"
+              echo "   docker-compose -f docker-compose.ollama.yml down"
+              echo ""
+              echo "🗄️  View assistant's thoughts:"
+              echo "   sqlite3 replicante-ollama.db \"SELECT * FROM decisions ORDER BY created_at DESC LIMIT 5;\""
+            '';
+          };
+          
+          # Quick Ollama start with Nix
+          ollama-nix = {
+            type = "app";
+            program = pkgs.writeShellScript "ollama-nix" ''
+              set -e
+              
+              echo "🤖 Starting Replicante with Ollama (Nix)"
+              echo "======================================="
+              echo ""
+              
+              # Check if Ollama is running
+              if ! curl -s http://localhost:11434/api/tags > /dev/null 2>&1; then
+                echo "❌ Ollama not running. Please start Ollama first:"
+                echo "   ollama serve"
+                echo ""
+                echo "   Then pull a model:"
+                echo "   ollama pull llama3.2:3b"
+                exit 1
+              fi
+              
+              echo "✅ Ollama is running"
+              
+              # Check for config
+              if [ ! -f "config.toml" ]; then
+                echo "📝 Creating config from Ollama example..."
+                cp config-ollama-example.toml config.toml
+                echo "✅ Config created: config.toml"
+              fi
+              
+              echo ""
+              echo "🚀 Starting Replicante assistant..."
+              echo "   Press Ctrl+C to stop"
+              echo ""
+              
+              # Run in development mode
+              nix develop -c cargo run --release
+            '';
+          };
+        };
+
         devShells.default = pkgs.mkShell {
           packages = with pkgs; [
             bashInteractive
