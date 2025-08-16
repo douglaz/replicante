@@ -239,10 +239,7 @@ async fn test_http_mcp_server() -> Result<()> {
 
     assert!(result["success"].as_bool().unwrap_or(false));
     let content = result["content"].as_str().unwrap_or("");
-    assert!(
-        content.contains("UTC"),
-        "Time should include timezone info"
-    );
+    assert!(content.contains("UTC"), "Time should include timezone info");
 
     Ok(())
 }
