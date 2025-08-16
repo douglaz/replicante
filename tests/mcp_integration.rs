@@ -3,7 +3,6 @@ use replicante::mcp::{MCPClient, MCPServerConfig};
 use std::path::PathBuf;
 use std::time::Duration;
 use tokio::time::timeout;
-use tracing_subscriber;
 
 // MCP Integration Tests
 //
