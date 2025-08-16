@@ -39,6 +39,22 @@ export OPENAI_API_KEY=sk-...
 cargo run --release
 ```
 
+### Local Testing with Ollama
+
+For local testing with Ollama (no API keys required):
+
+```bash
+# Install and start Ollama
+ollama serve
+ollama pull llama3.2:3b
+
+# Run with example configuration
+cp config-ollama-example.toml config.toml
+cargo run --release
+```
+
+See [OLLAMA_EXAMPLE.md](OLLAMA_EXAMPLE.md) for detailed instructions on testing the enhanced MCP features and learning system locally.
+
 ## Configuration
 
 Edit `config.toml` to configure:

@@ -1,0 +1,106 @@
+# Example configuration for testing Replicante with Ollama
+# This configuration demonstrates the enhanced MCP features and learning system
+
+# Database location - will be created if it doesn't exist
+database_path = "replicante-ollama.db"
+
+[agent]
+# Unique identifier for this agent instance
+id = "replicante-ollama-demo"
+
+# Logging level: trace, debug, info, warn, error
+log_level = "info"
+
+# Time between reasoning cycles (seconds)
+reasoning_interval_secs = 10
+
+# Initial goals that showcase the new features
+initial_goals = """
+Your primary goals are:
+1. Explore and discover available tools through the MCP system
+2. Test tools multiple times to build confidence patterns
+3. Learn from successes and failures to improve decision-making
+4. Track your performance metrics and adapt strategies
+5. Demonstrate resilience by handling tool failures gracefully
+6. Build a knowledge base of what works and what doesn't
+7. Use learned patterns to become more efficient over time
+"""
+
+[llm]
+# LLM provider configuration for Ollama
+provider = "ollama"
+
+# Model to use - llama3.2:3b is fast and efficient
+# Other options: llama2:7b, mistral:7b, codellama:7b, phi3:mini
+model = "llama3.2:3b"
+
+# Ollama API endpoint (default local installation)
+api_url = "http://localhost:11434"
+
+# Temperature for response generation (0.0-1.0, higher = more creative)
+temperature = 0.7
+
+# Maximum tokens in response
+max_tokens = 2000
+
+# MCP (Model Context Protocol) Servers
+# These demonstrate the enhanced retry and health monitoring features
+
+# Example 1: Filesystem mock with moderate retry settings
+[[mcp_servers]]
+name = "filesystem-mock"
+transport = "stdio"
+command = "echo"  # Replace with actual mcp-server-filesystem when available
+args = ["filesystem simulation"]
+retry_attempts = 3              # Try 3 times before giving up
+retry_delay_ms = 1000          # Wait 1 second between attempts
+health_check_interval_secs = 60 # Check health every minute
+
+# Example 2: HTTP mock with faster retry for testing
+[[mcp_servers]]
+name = "http-mock"
+transport = "stdio"
+command = "echo"  # Replace with actual mcp-server-http when available
+args = ["http simulation"]
+retry_attempts = 2              # Fewer retries for HTTP
+retry_delay_ms = 500           # Shorter delay
+health_check_interval_secs = 45 # More frequent health checks
+
+# Example 3: Intentionally failing server to demonstrate retry logic
+[[mcp_servers]]
+name = "test-failure"
+transport = "stdio"
+command = "false"  # This will always fail
+args = []
+retry_attempts = 5              # Will retry 5 times
+retry_delay_ms = 2000          # 2 second delay between attempts
+health_check_interval_secs = 120 # Less frequent checks for known failures
+
+# Example 4: Quick echo server for basic functionality
+[[mcp_servers]]
+name = "echo-test"
+transport = "stdio"
+command = "echo"
+args = ["MCP Echo Test"]
+retry_attempts = 1              # Minimal retries for simple commands
+retry_delay_ms = 100           # Very short delay
+health_check_interval_secs = 300 # Infrequent checks for stable servers
+
+# Add more MCP servers as they become available:
+# [[mcp_servers]]
+# name = "nostr"
+# transport = "stdio"
+# command = "mcp-server-nostr"
+# args = ["--relay", "wss://relay.damus.io"]
+# retry_attempts = 3
+# retry_delay_ms = 3000
+# health_check_interval_secs = 90
+
+# [[mcp_servers]]
+# name = "bitcoin"
+# transport = "stdio"
+# command = "mcp-server-bitcoin"
+# args = ["--network", "testnet"]
+# retry_attempts = 3
+# retry_delay_ms = 5000
+# health_check_interval_secs = 120
