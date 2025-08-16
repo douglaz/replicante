@@ -189,7 +189,42 @@ Example response:
     async fn decide(&self, thought: Thought) -> Result<Action> {
         info!("Deciding on action based on thought...");
 
-        // Record the thought
+        // Check if we have learned patterns for this context
+        let context = thought.reasoning.chars().take(100).collect::<String>();
+        if let Ok(Some((best_action, confidence))) = self
+            .state
+            .get_best_action_for_context("reasoning", &context, 0.7)
+            .await
+        {
+            info!("Found learned pattern with {confidence:.2} confidence: {best_action}");
+            // Consider using the learned action if confidence is high enough
+            if confidence > 0.85 && thought.proposed_actions.contains(&best_action) {
+                info!("Using learned action based on past success");
+                // Move the learned action to the front
+                let mut reordered = vec![best_action.clone()];
+                for action in &thought.proposed_actions {
+                    if action != &best_action {
+                        reordered.push(action.clone());
+                    }
+                }
+                // Update proposed actions with learned preference
+                let mut updated_thought = thought;
+                updated_thought.proposed_actions = reordered;
+
+                // Record the decision with learning influence
+                self.state
+                    .record_decision(
+                        &format!("{} [learned]", updated_thought.reasoning),
+                        &format!("{actions:?}", actions = updated_thought.proposed_actions),
+                        None,
+                    )
+                    .await?;
+
+                return self.execute_decision(updated_thought).await;
+            }
+        }
+
+        // Record the thought normally
         self.state
             .record_decision(
                 &thought.reasoning,
@@ -198,6 +233,10 @@ Example response:
             )
             .await?;
 
+        self.execute_decision(thought).await
+    }
+
+    async fn execute_decision(&self, thought: Thought) -> Result<Action> {
         // For now, simple decision logic - can be enhanced
         if thought.proposed_actions.is_empty() {
             return Ok(Action::Explore);
@@ -257,23 +296,55 @@ Example response:
         info!("Executing action: {:?}", action);
 
         match action {
-            Action::UseTool { name, params } => match self.mcp.use_tool(&name, params).await {
-                Ok(result) => {
-                    info!("Tool {name} executed successfully");
-                    self.state
-                        .remember(
-                            &format!(
-                                "tool_result_{timestamp}",
-                                timestamp = Utc::now().timestamp()
-                            ),
-                            result,
-                        )
-                        .await?;
+            Action::UseTool { name, params } => {
+                let context = format!("tool_use_{name}");
+                match self.mcp.use_tool(&name, params.clone()).await {
+                    Ok(result) => {
+                        info!("Tool {name} executed successfully");
+
+                        // Record successful pattern
+                        self.state
+                            .record_action_pattern(
+                                "tool_execution",
+                                &context,
+                                &name,
+                                Some(&format!("{result:?}")),
+                                true,
+                            )
+                            .await?;
+
+                        // Update capability tracking
+                        self.state.record_capability(&name, None, true).await?;
+
+                        self.state
+                            .remember(
+                                &format!(
+                                    "tool_result_{timestamp}",
+                                    timestamp = Utc::now().timestamp()
+                                ),
+                                result,
+                            )
+                            .await?;
+                    }
+                    Err(e) => {
+                        warn!("Tool execution failed: {e}");
+
+                        // Record failure pattern
+                        self.state
+                            .record_action_pattern(
+                                "tool_execution",
+                                &context,
+                                &name,
+                                Some(&e.to_string()),
+                                false,
+                            )
+                            .await?;
+
+                        // Update capability tracking
+                        self.state.record_capability(&name, None, false).await?;
+                    }
                 }
-                Err(e) => {
-                    warn!("Tool execution failed: {e}");
-                }
-            },
+            }
             Action::Think { about } => {
                 info!("Deep thinking about: {about}");
                 // Could trigger more complex reasoning here
@@ -301,14 +372,42 @@ Example response:
 
     async fn learn(&mut self) -> Result<()> {
         // Analyze recent decisions and outcomes
-        let recent = self.state.get_recent_decisions(5).await?;
+        let recent = self.state.get_recent_decisions(10).await?;
 
         if !recent.is_empty() {
             info!(
                 "Learning from {count} recent decisions",
                 count = recent.len()
             );
-            // Could implement learning algorithms here
+
+            // Analyze patterns in recent decisions
+            let analysis = self.state.analyze_decision_patterns(24).await?;
+
+            // Update learning metrics based on analysis
+            if let Some(patterns) = analysis["successful_patterns"].as_array() {
+                let success_rate = patterns.len() as f64 / recent.len() as f64;
+                self.state
+                    .update_learning_metric("decision_success_rate", success_rate)
+                    .await?;
+            }
+
+            // Track tool performance
+            if let Some(tools) = analysis["tool_performance"].as_array() {
+                for tool in tools {
+                    if let (Some(name), Some(rate)) =
+                        (tool["tool"].as_str(), tool["success_rate"].as_f64())
+                    {
+                        self.state
+                            .update_learning_metric(&format!("tool_success_{name}"), rate)
+                            .await?;
+                    }
+                }
+            }
+
+            // Store learning insights
+            self.state
+                .remember("last_learning_analysis", analysis)
+                .await?;
         }
 
         Ok(())
