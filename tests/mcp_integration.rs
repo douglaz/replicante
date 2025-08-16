@@ -6,10 +6,10 @@ use tokio::time::timeout;
 use tracing_subscriber;
 
 // MCP Integration Tests
-// 
+//
 // These tests verify the full MCP (Model Context Protocol) client-server communication:
 // - Server subprocess spawning and stdio communication
-// - JSON-RPC handshake and protocol compliance  
+// - JSON-RPC handshake and protocol compliance
 // - Tool discovery and execution
 // - Multiple concurrent servers
 // - Error handling and recovery
@@ -62,7 +62,7 @@ async fn test_mock_server_full_flow() -> Result<()> {
     let _ = tracing_subscriber::fmt()
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .try_init();
-        
+
     // Wrap entire test with timeout to prevent hanging
     timeout(Duration::from_secs(15), async {
         let configs = vec![MCPServerConfig {
@@ -154,7 +154,7 @@ async fn test_multiple_servers() -> Result<()> {
     let _ = tracing_subscriber::fmt()
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .try_init();
-        
+
     // Wrap entire test with timeout to prevent hanging
     timeout(Duration::from_secs(15), async {
         let configs = vec![
@@ -200,7 +200,7 @@ async fn test_http_mcp_server() -> Result<()> {
     let _ = tracing_subscriber::fmt()
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .try_init();
-        
+
     // Wrap entire test with timeout to prevent hanging
     timeout(Duration::from_secs(15), async {
         let configs = vec![MCPServerConfig {
