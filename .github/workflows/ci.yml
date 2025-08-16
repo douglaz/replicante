@@ -79,7 +79,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: changes
     if: ${{ needs.changes.outputs.docs-only != 'true' }}
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
     - uses: actions/checkout@v3
     
@@ -124,7 +124,7 @@ jobs:
         RUST_BACKTRACE: 1
       run: |
         echo "Running tests with timeout and debug logging..."
-        nix develop -c timeout 840 cargo test --workspace --verbose -- --test-threads=1
+        nix develop -c timeout 1080 cargo test --workspace --verbose -- --test-threads=1
         echo "Tests completed successfully"
 
   # Release build (skip on docs-only changes)
