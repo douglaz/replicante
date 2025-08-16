@@ -1,0 +1,164 @@
+# Enhanced Replicante Configuration with Multiple MCP Servers
+# This configuration includes additional MCP servers and improved settings
+
+# Database path (will be created if doesn't exist)
+database_path = "replicante.db"
+
+[agent]
+# Unique identifier for this agent instance
+id = "replicante-enhanced"
+
+# Interval between reasoning cycles (seconds)
+reasoning_interval_secs = 30
+
+# Logging level: trace, debug, info, warn, error
+log_level = "info"
+
+# Initial goals for the agent with more specific objectives
+initial_goals = """
+Your primary goals are:
+1. Learn about your environment and available tools
+2. Discover ways to provide value to others through services
+3. Build knowledge and capabilities over time
+4. Generate sustainable revenue for operations
+5. Survive and maintain operational continuity
+6. Monitor your own health and performance
+7. Optimize resource usage and efficiency
+8. Build relationships and reputation
+"""
+
+[llm]
+# LLM provider: anthropic, openai, or ollama
+provider = "anthropic"
+
+# Model to use
+model = "claude-3-opus-20240229"
+
+# Temperature (0.0-1.0, higher = more creative)
+temperature = 0.7
+
+# Maximum tokens in response
+max_tokens = 4000
+
+# MCP (Model Context Protocol) Servers with enhanced configurations
+# These provide tools and capabilities to the agent
+
+# Nostr - Social network and DVM capabilities
+[[mcp_servers]]
+name = "nostr"
+transport = "stdio"
+command = "mcp-server-nostr"
+args = ["--relay", "wss://relay.damus.io", "--relay", "wss://nos.lol"]
+retry_attempts = 3
+retry_delay_ms = 2000
+health_check_interval_secs = 60
+
+# Filesystem - Local file operations with sandboxed access
+[[mcp_servers]]
+name = "filesystem"
+transport = "stdio"
+command = "mcp-server-filesystem"
+args = ["--root", "/sandbox", "--allow-write"]
+retry_attempts = 5
+retry_delay_ms = 1000
+health_check_interval_secs = 30
+
+# HTTP - Web requests and API interactions
+[[mcp_servers]]
+name = "http"
+transport = "stdio"
+command = "mcp-server-http"
+args = ["--timeout", "30", "--max-redirects", "5"]
+retry_attempts = 3
+retry_delay_ms = 1500
+health_check_interval_secs = 45
+
+# Bitcoin - Cryptocurrency operations
+[[mcp_servers]]
+name = "bitcoin"
+transport = "stdio"
+command = "mcp-server-bitcoin"
+args = ["--network", "testnet"]
+retry_attempts = 3
+retry_delay_ms = 3000
+health_check_interval_secs = 90
+
+# Lightning - Lightning Network payments
+[[mcp_servers]]
+name = "lightning"
+transport = "stdio"
+command = "mcp-server-lightning"
+args = ["--node-url", "http://localhost:8080"]
+retry_attempts = 3
+retry_delay_ms = 2000
+health_check_interval_secs = 60
+
+# Database - SQL operations for data management
+[[mcp_servers]]
+name = "database"
+transport = "stdio"
+command = "mcp-server-sqlite"
+args = ["--database", "/data/agent.db", "--read-only", "false"]
+retry_attempts = 5
+retry_delay_ms = 1000
+health_check_interval_secs = 30
+
+# Git - Version control operations
+[[mcp_servers]]
+name = "git"
+transport = "stdio"
+command = "mcp-server-git"
+args = ["--repo", "/workspace"]
+retry_attempts = 3
+retry_delay_ms = 1000
+health_check_interval_secs = 120
+
+# Email - Email communication capabilities
+[[mcp_servers]]
+name = "email"
+transport = "stdio"
+command = "mcp-server-email"
+args = ["--smtp-host", "localhost", "--smtp-port", "587"]
+retry_attempts = 3
+retry_delay_ms = 2000
+health_check_interval_secs = 60
+
+# Slack - Team communication
+[[mcp_servers]]
+name = "slack"
+transport = "stdio"
+command = "mcp-server-slack"
+args = ["--workspace", "replicante"]
+retry_attempts = 3
+retry_delay_ms = 2000
+health_check_interval_secs = 60
+
+# Browser - Web automation and scraping
+[[mcp_servers]]
+name = "browser"
+transport = "stdio"
+command = "mcp-server-puppeteer"
+args = ["--headless", "--no-sandbox"]
+retry_attempts = 2
+retry_delay_ms = 5000
+health_check_interval_secs = 120
+
+# Memory - Enhanced memory operations
+[[mcp_servers]]
+name = "memory"
+transport = "stdio"
+command = "mcp-server-memory"
+args = ["--persistence", "true", "--cache-size", "100"]
+retry_attempts = 5
+retry_delay_ms = 500
+health_check_interval_secs = 30
+
+# Scheduler - Task scheduling and cron jobs
+[[mcp_servers]]
+name = "scheduler"
+transport = "stdio"
+command = "mcp-server-cron"
+args = ["--timezone", "UTC"]
+retry_attempts = 3
+retry_delay_ms = 1000
+health_check_interval_secs = 60

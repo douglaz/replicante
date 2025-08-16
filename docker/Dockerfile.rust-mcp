@@ -1,0 +1,49 @@
+# Multi-stage build for Rust MCP servers
+FROM rust:1.75-slim as builder
+
+# Install system dependencies for building
+RUN apt-get update && apt-get install -y \
+    pkg-config \
+    libssl-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Set working directory
+WORKDIR /build
+
+# Copy source code
+COPY . .
+
+# Build the MCP server binaries in release mode
+RUN cargo build --release --bin mock-mcp-server --bin http-mcp-server
+
+# Runtime stage - minimal image
+FROM debian:bookworm-slim
+
+# Install runtime dependencies
+RUN apt-get update && apt-get install -y \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy the built binaries
+COPY --from=builder /build/target/release/mock-mcp-server /usr/local/bin/
+COPY --from=builder /build/target/release/http-mcp-server /usr/local/bin/
+
+# Make binaries executable
+RUN chmod +x /usr/local/bin/mock-mcp-server /usr/local/bin/http-mcp-server
+
+# Create non-root user
+RUN useradd -r -s /bin/false mcp
+
+# Set up health check script
+RUN echo '#!/bin/bash\necho "healthy"' > /usr/local/bin/health.sh && \
+    chmod +x /usr/local/bin/health.sh
+
+# Switch to non-root user
+USER mcp
+
+# Default to the HTTP MCP server
+CMD ["/usr/local/bin/http-mcp-server"]
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+    CMD /usr/local/bin/health.sh

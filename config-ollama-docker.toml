@@ -1,0 +1,66 @@
+# Docker-optimized configuration for Replicante with Ollama
+# This config is designed for running inside Docker containers
+
+database_path = "/data/replicante-ollama.db"
+
+[agent]
+id = "replicante-ollama-docker"
+log_level = "info"
+reasoning_interval_secs = 30
+
+# Goals focused on providing useful services
+initial_goals = """
+You are an autonomous AI assistant running in a Docker environment. Your goals are:
+
+1. **Provide Useful Information**: Answer questions, perform calculations, and provide time/weather data
+2. **Learn and Adapt**: Remember what works and what doesn't to improve over time  
+3. **Demonstrate Capabilities**: Show what you can do with available tools
+4. **Stay Operational**: Monitor your health and restart tools if needed
+5. **Generate Value**: Focus on tasks that help users accomplish their goals
+
+Available tools:
+- Calculator: Perform mathematical calculations
+- Time Service: Get current time in different timezones
+- Weather Service: Provide weather information (simulated)
+- HTTP Client: Fetch data from safe web URLs
+- Echo Service: Simple message processing
+
+Use these tools to provide helpful responses and demonstrate your capabilities.
+"""
+
+[llm]
+provider = "ollama"
+model = "llama3.2:3b"
+api_url = "http://172.17.0.1:11434"
+temperature = 0.7
+max_tokens = 2000
+
+# MCP Servers - using Rust-based tools built into the container
+
+[[mcp_servers]]
+name = "http-tools"
+transport = "stdio"
+command = "/usr/local/bin/http-mcp-server"
+args = []
+retry_attempts = 3
+retry_delay_ms = 2000
+health_check_interval_secs = 60
+
+[[mcp_servers]]
+name = "basic-tools"
+transport = "stdio"
+command = "/usr/local/bin/mock-mcp-server"
+args = []
+retry_attempts = 2
+retry_delay_ms = 1500
+health_check_interval_secs = 90
+
+# Alternative: Direct connection to containerized MCP server
+# This would require the MCP client to connect over network
+# [[mcp_servers]]
+# name = "http-tools"  
+# transport = "http"
+# url = "http://mcp-tools:5000"
+# retry_attempts = 3
+# retry_delay_ms = 1000
+# health_check_interval_secs = 45
