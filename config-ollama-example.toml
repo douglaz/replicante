@@ -58,8 +58,8 @@ max_tokens = 2000
 [[mcp_servers]]
 name = "http-tools"
 transport = "stdio"
-command = "python"
-args = ["-u", "test/http_mcp_server.py"]
+command = "cargo"
+args = ["run", "--bin", "http-mcp-server"]
 retry_attempts = 3
 retry_delay_ms = 1500
 health_check_interval_secs = 60
@@ -68,8 +68,8 @@ health_check_interval_secs = 60
 [[mcp_servers]]
 name = "basic-tools"
 transport = "stdio"
-command = "python"
-args = ["-u", "test/mock_mcp_server.py"]
+command = "cargo"
+args = ["run", "--bin", "mock-mcp-server"]
 retry_attempts = 2
 retry_delay_ms = 1000
 health_check_interval_secs = 120

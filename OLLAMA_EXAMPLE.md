@@ -182,8 +182,8 @@ Extend the assistant's capabilities by adding MCP servers:
 [[mcp_servers]]
 name = "custom-tools"
 transport = "stdio"
-command = "python"
-args = ["-u", "/path/to/your_mcp_server.py"]
+command = "cargo"
+args = ["run", "--bin", "your-mcp-server"]
 retry_attempts = 3
 retry_delay_ms = 1000
 health_check_interval_secs = 60
@@ -279,7 +279,7 @@ sqlite3 replicante-ollama.db "SELECT COUNT(*) FROM decisions;"
 docker-compose -f docker-compose.ollama.yml logs mcp-tools
 
 # Test tools manually
-docker exec replicante-mcp-tools python /app/http_mcp_server.py
+docker exec replicante-mcp-tools /usr/local/bin/http-mcp-server
 ```
 
 ### Memory/Performance Issues
@@ -294,6 +294,25 @@ docker exec replicante-ollama ollama pull llama3.2:1b
 # Limit Docker resources in docker-compose.ollama.yml
 ```
 
+## Technical Architecture
+
+This setup uses a **100% Rust** implementation for maximum performance and safety:
+
+🦀 **Rust Agent Core**: Fast, memory-safe autonomous reasoning  
+🦀 **Rust MCP Servers**: Native tool implementations (no Python dependencies)  
+🦀 **Async I/O**: High-performance concurrent operations  
+🦀 **SQLite Integration**: Persistent memory and learning storage  
+⚡ **Local LLM**: Ollama provides fast, private inference  
+🐳 **Docker Ready**: Easy containerized deployment  
+
+### MCP Tool Servers
+
+The included Rust-based MCP servers provide:
+- **mock-mcp-server**: Basic tools (echo, math, time)
+- **http-mcp-server**: Web tools (fetch, weather, calculations)
+
+Both are built as optimized Rust binaries for maximum efficiency.
+
 ## What Makes This Practical
 
 Unlike technical demos, this setup provides:
@@ -303,7 +322,8 @@ Unlike technical demos, this setup provides:
 ✅ **Persistent Learning**: Remembers what works across restarts  
 ✅ **Easy Deployment**: One command Docker setup  
 ✅ **Local Privacy**: Everything runs on your machine  
-✅ **Extensible**: Easy to add new tools and capabilities  
+✅ **Extensible**: Easy to add new Rust-based tools and capabilities  
+✅ **High Performance**: Native Rust implementation throughout  
 
 ## Next Steps
 

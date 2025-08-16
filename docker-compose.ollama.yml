@@ -7,25 +7,25 @@ services:
   # Ollama LLM server (using host Ollama instance)
   # Note: We'll use the host Ollama instance already running on port 11434
 
-  # MCP Tools Server - containerized Python tools
+  # MCP Tools Server - containerized Rust tools
   mcp-tools:
     build:
       context: .
-      dockerfile: docker/Dockerfile.mcp-tools
+      dockerfile: docker/Dockerfile.rust-mcp
     container_name: replicante-mcp-tools
     networks:
       - replicante-ollama-net
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "echo", "healthy"]
+      test: ["CMD", "/usr/local/bin/health.sh"]
       interval: 30s
       timeout: 5s
       retries: 3
     deploy:
       resources:
         limits:
-          memory: 256M
-          cpus: '0.5'
+          memory: 128M
+          cpus: '0.3'
 
   # Replicante AI Agent
   replicante:

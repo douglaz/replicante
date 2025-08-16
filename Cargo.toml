@@ -58,6 +58,12 @@ warp = "0.3"
 # URL parsing
 url = "2.5"
 
+# Math expression evaluation (for MCP servers)
+evalexpr = "11.3"
+
+# Random number generation (for MCP servers)
+rand = "0.8"
+
 # Command-line argument parsing
 clap = { version = "4.5", features = ["derive", "env"] }
 
