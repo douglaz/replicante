@@ -6,10 +6,33 @@ on:
   pull_request:
     branches: [ master, main ]
 
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
 jobs:
-  test:
+  # Check if we should skip certain jobs for docs-only changes
+  changes:
     runs-on: ubuntu-latest
+    outputs:
+      docs-only: ${{ steps.changes.outputs.docs-only }}
+    steps:
+    - uses: actions/checkout@v3
+      with:
+        fetch-depth: 0
     
+    - name: Check for docs-only changes
+      id: changes
+      run: |
+        if git diff --name-only HEAD~1 HEAD | grep -qvE '^(README\.md|CLAUDE\.md|\.github/workflows/|docs/|.*\.md)$'; then
+          echo "docs-only=false" >> $GITHUB_OUTPUT
+        else
+          echo "docs-only=true" >> $GITHUB_OUTPUT
+        fi
+  # Fast feedback: Formatting and linting
+  check:
+    runs-on: ubuntu-latest
+    needs: changes
     steps:
     - uses: actions/checkout@v3
     
@@ -32,20 +55,107 @@ jobs:
         key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
         restore-keys: |
           ${{ runner.os }}-cargo-registry-
+
+    - name: Cache target directory
+      uses: actions/cache@v3
+      with:
+        path: target/
+        key: ${{ runner.os }}-target-check-${{ hashFiles('**/Cargo.lock') }}
+        restore-keys: |
+          ${{ runner.os }}-target-check-
+          ${{ runner.os }}-target-
     
     - name: Check formatting
       run: nix develop -c cargo fmt -- --check
     
+    - name: Quick compile check
+      run: nix develop -c cargo check --workspace --all-targets
+    
     - name: Run clippy
-      run: nix develop -c cargo clippy -- -D warnings
+      run: nix develop -c cargo clippy --workspace --all-targets -- -D warnings
+
+  # Test suite
+  test:
+    runs-on: ubuntu-latest
+    needs: changes
+    if: ${{ needs.changes.outputs.docs-only != 'true' }}
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Install Nix
+      uses: cachix/install-nix-action@v22
+      with:
+        extra_nix_config: |
+          experimental-features = nix-command flakes
+    
+    - name: Setup Magic Nix Cache
+      uses: DeterminateSystems/magic-nix-cache-action@main
+    
+    - name: Cache cargo registry
+      uses: actions/cache@v3
+      with:
+        path: |
+          ~/.cargo/registry/index/
+          ~/.cargo/registry/cache/
+          ~/.cargo/git/db/
+        key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+        restore-keys: |
+          ${{ runner.os }}-cargo-registry-
+
+    - name: Cache target directory
+      uses: actions/cache@v3
+      with:
+        path: target/
+        key: ${{ runner.os }}-target-test-${{ hashFiles('**/Cargo.lock') }}
+        restore-keys: |
+          ${{ runner.os }}-target-test-
+          ${{ runner.os }}-target-
     
     - name: Run tests
-      run: nix develop -c cargo test --verbose
+      run: nix develop -c cargo test --workspace --verbose
+
+  # Release build (skip on docs-only changes)
+  build:
+    runs-on: ubuntu-latest
+    needs: changes
+    # Skip build if only documentation files changed
+    if: ${{ needs.changes.outputs.docs-only != 'true' && !contains(github.event.head_commit.message, '[skip build]') }}
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Install Nix
+      uses: cachix/install-nix-action@v22
+      with:
+        extra_nix_config: |
+          experimental-features = nix-command flakes
+    
+    - name: Setup Magic Nix Cache
+      uses: DeterminateSystems/magic-nix-cache-action@main
+    
+    - name: Cache cargo registry
+      uses: actions/cache@v3
+      with:
+        path: |
+          ~/.cargo/registry/index/
+          ~/.cargo/registry/cache/
+          ~/.cargo/git/db/
+        key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+        restore-keys: |
+          ${{ runner.os }}-cargo-registry-
+
+    - name: Cache target directory (musl)
+      uses: actions/cache@v3
+      with:
+        path: target/
+        key: ${{ runner.os }}-target-musl-${{ hashFiles('**/Cargo.lock') }}
+        restore-keys: |
+          ${{ runner.os }}-target-musl-
+          ${{ runner.os }}-target-
     
     - name: Build musl binary
       run: |
         echo "Building musl target..."
-        nix develop -c cargo build --release --target x86_64-unknown-linux-musl
+        nix develop -c cargo build --release --target x86_64-unknown-linux-musl --bin replicante
     
     - name: Verify musl binary
       run: |
@@ -60,3 +170,10 @@ jobs:
           echo "Binary dependencies:"
           ldd target/x86_64-unknown-linux-musl/release/replicante || true
         fi
+    
+    - name: Upload binary artifact
+      uses: actions/upload-artifact@v3
+      with:
+        name: replicante-musl-binary
+        path: target/x86_64-unknown-linux-musl/release/replicante
+        retention-days: 7
