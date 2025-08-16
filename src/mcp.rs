@@ -143,9 +143,10 @@ impl MCPClient {
         let config = server_guard.config.clone();
 
         info!(
-            "Starting MCP server process: {} {}",
+            "Starting MCP server process: {} {} (server: {})",
             config.command,
-            config.args.join(" ")
+            config.args.join(" "),
+            server_guard.name
         );
 
         // Spawn the MCP server process
@@ -156,12 +157,15 @@ impl MCPClient {
             .stderr(Stdio::piped())
             .kill_on_drop(true);
 
+        debug!("Spawning MCP server process: {}", config.command);
         let mut child = cmd.spawn().with_context(|| {
             format!(
                 "Failed to spawn MCP server: {command}",
                 command = config.command
             )
         })?;
+        
+        debug!("MCP server process spawned with PID: {:?}", child.id());
 
         // Get handles to stdin/stdout
         let stdin = child
@@ -198,6 +202,9 @@ impl MCPClient {
                 }
 
                 debug!("Received from {server_name_stdout}: {line}");
+                
+                // Yield to allow other tasks to run
+                tokio::task::yield_now().await;
 
                 match Message::parse(&line) {
                     Ok(msg) => {
@@ -209,6 +216,9 @@ impl MCPClient {
                         error!("Failed to parse JSON-RPC message: {e}");
                     }
                 }
+                
+                // Yield again after processing
+                tokio::task::yield_now().await;
             }
 
             warn!("MCP server {server_name_stdout} stdout closed");
@@ -226,10 +236,24 @@ impl MCPClient {
         });
 
         // Wait a bit for the handlers to be ready
+        debug!("Waiting for MCP server handlers to be ready...");
         tokio::time::sleep(Duration::from_millis(100)).await;
 
-        // Initialize the MCP connection
-        Self::initialize_connection(server.clone(), stdin).await?;
+        // Initialize the MCP connection with timeout
+        debug!("Starting MCP connection initialization for server: {}", server_name);
+        match timeout(Duration::from_secs(10), Self::initialize_connection(server.clone(), stdin)).await {
+            Ok(Ok(())) => {
+                debug!("MCP server initialization completed successfully: {}", server_name);
+            }
+            Ok(Err(e)) => {
+                error!("MCP server initialization failed: {}: {}", server_name, e);
+                return Err(e);
+            }
+            Err(_) => {
+                error!("MCP server initialization timed out: {}", server_name);
+                bail!("MCP server initialization timed out");
+            }
+        }
 
         Ok(())
     }
@@ -243,13 +267,16 @@ impl MCPClient {
         drop(server_guard);
 
         // Send initialize request
+        debug!("Sending initialize request to MCP server: {}", server_name);
         let init_params = InitializeParams::new(
             "replicante".to_string(),
             env!("CARGO_PKG_VERSION").to_string(),
         );
 
         let request = Request::new("initialize", Some(serde_json::to_value(init_params)?));
+        debug!("Initialize request created for {}: {:?}", server_name, request.method);
         let response = Self::send_request(server.clone(), stdin.clone(), request).await?;
+        debug!("Initialize response received from {}", server_name);
 
         // Parse initialize response
         if let Some(result) = response.result {
@@ -262,8 +289,10 @@ impl MCPClient {
             );
 
             // Send initialized notification
+            debug!("Sending initialized notification to {}", server_name);
             let notification = Request::notification("initialized", Some(serde_json::json!({})));
             Self::send_notification(stdin.clone(), notification).await?;
+            debug!("Initialized notification sent to {}", server_name);
 
             // Mark server as initialized and healthy
             let mut server_guard = server.lock().await;
@@ -272,8 +301,21 @@ impl MCPClient {
             server_guard.error_count = 0;
             drop(server_guard);
 
-            // Discover available tools
-            Self::discover_server_tools(server.clone(), stdin.clone()).await?;
+            // Discover available tools with timeout
+            debug!("Starting tool discovery for {}", server_name);
+            match timeout(Duration::from_secs(5), Self::discover_server_tools(server.clone(), stdin.clone())).await {
+                Ok(Ok(())) => {
+                    debug!("Tool discovery completed for {}", server_name);
+                }
+                Ok(Err(e)) => {
+                    error!("Tool discovery failed for {}: {}", server_name, e);
+                    return Err(e);
+                }
+                Err(_) => {
+                    error!("Tool discovery timed out for {}", server_name);
+                    bail!("Tool discovery timed out");
+                }
+            }
         } else if let Some(error) = response.error {
             bail!(
                 "Initialize failed: {message} (code: {code})",
@@ -346,16 +388,30 @@ impl MCPClient {
         }
 
         debug!("Sent request: {request}", request = json.trim());
+        
+        // Add server name context for debugging
+        let server_name = {
+            let server_guard = server.lock().await;
+            server_guard.name.clone()
+        };
 
         // Wait for response with timeout
+        debug!("Waiting for response from {} for request ID: {:?}", server_name, request_id);
         match timeout(Duration::from_secs(30), rx).await {
-            Ok(Ok(response)) => Ok(response),
-            Ok(Err(_)) => bail!("Response channel closed"),
+            Ok(Ok(response)) => {
+                debug!("Received response from {} for request ID: {:?}", server_name, request_id);
+                Ok(response)
+            }
+            Ok(Err(_)) => {
+                error!("Response channel closed for {} request ID: {:?}", server_name, request_id);
+                bail!("Response channel closed")
+            }
             Err(_) => {
                 // Clean up pending request on timeout
+                error!("Request timeout for {} request ID: {:?}", server_name, request_id);
                 let mut server_guard = server.lock().await;
                 server_guard.pending_requests.remove(&request_id);
-                bail!("Request timeout")
+                bail!("Request timeout after 30 seconds")
             }
         }
     }

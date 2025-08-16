@@ -119,9 +119,12 @@ jobs:
         echo "Binaries built successfully"
     
     - name: Run tests
+      env:
+        RUST_LOG: debug
+        RUST_BACKTRACE: 1
       run: |
-        echo "Running tests with timeout..."
-        nix develop -c timeout 600 cargo test --workspace --verbose
+        echo "Running tests with timeout and debug logging..."
+        nix develop -c timeout 480 cargo test --workspace --verbose --test-threads=1
         echo "Tests completed successfully"
 
   # Release build (skip on docs-only changes)

@@ -3,6 +3,18 @@ use replicante::mcp::{MCPClient, MCPServerConfig};
 use std::path::PathBuf;
 use std::time::Duration;
 use tokio::time::timeout;
+use tracing_subscriber;
+
+// MCP Integration Tests
+// 
+// These tests verify the full MCP (Model Context Protocol) client-server communication:
+// - Server subprocess spawning and stdio communication
+// - JSON-RPC handshake and protocol compliance  
+// - Tool discovery and execution
+// - Multiple concurrent servers
+// - Error handling and recovery
+//
+// Tests use debug logging and tracing subscriber for better CI diagnostics.
 
 /// Helper to get the path to compiled binaries
 fn target_binary_path(bin_name: &str) -> String {
@@ -46,20 +58,25 @@ async fn test_echo_server() -> Result<()> {
 
 #[tokio::test]
 async fn test_mock_server_full_flow() -> Result<()> {
+    // Initialize tracing for debug output
+    let _ = tracing_subscriber::fmt()
+        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+        .try_init();
+        
     // Wrap entire test with timeout to prevent hanging
-    timeout(Duration::from_secs(30), async {
+    timeout(Duration::from_secs(15), async {
         let configs = vec![MCPServerConfig {
             name: "mock".to_string(),
             transport: "stdio".to_string(),
             command: target_binary_path("mock-mcp-server"),
             args: vec![],
-            retry_attempts: 2,
-            retry_delay_ms: 500,
+            retry_attempts: 1,
+            retry_delay_ms: 100,
             health_check_interval_secs: 30,
         }];
 
-        // Create client with timeout
-        let client = timeout(Duration::from_secs(5), MCPClient::new(&configs)).await??;
+        // Create client with shorter timeout
+        let client = timeout(Duration::from_secs(3), MCPClient::new(&configs)).await??;
 
         // Wait a bit for initialization
         tokio::time::sleep(Duration::from_millis(500)).await;
@@ -133,16 +150,21 @@ async fn test_mock_server_full_flow() -> Result<()> {
 
 #[tokio::test]
 async fn test_multiple_servers() -> Result<()> {
+    // Initialize tracing for debug output
+    let _ = tracing_subscriber::fmt()
+        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+        .try_init();
+        
     // Wrap entire test with timeout to prevent hanging
-    timeout(Duration::from_secs(30), async {
+    timeout(Duration::from_secs(15), async {
         let configs = vec![
             MCPServerConfig {
                 name: "mock1".to_string(),
                 transport: "stdio".to_string(),
                 command: target_binary_path("mock-mcp-server"),
                 args: vec![],
-                retry_attempts: 2,
-                retry_delay_ms: 500,
+                retry_attempts: 1,
+                retry_delay_ms: 100,
                 health_check_interval_secs: 30,
             },
             MCPServerConfig {
@@ -150,13 +172,13 @@ async fn test_multiple_servers() -> Result<()> {
                 transport: "stdio".to_string(),
                 command: target_binary_path("mock-mcp-server"),
                 args: vec![],
-                retry_attempts: 2,
-                retry_delay_ms: 500,
+                retry_attempts: 1,
+                retry_delay_ms: 100,
                 health_check_interval_secs: 30,
             },
         ];
 
-        let client = timeout(Duration::from_secs(5), MCPClient::new(&configs)).await??;
+        let client = timeout(Duration::from_secs(3), MCPClient::new(&configs)).await??;
 
         // Wait for initialization
         tokio::time::sleep(Duration::from_millis(500)).await;
@@ -174,20 +196,25 @@ async fn test_multiple_servers() -> Result<()> {
 
 #[tokio::test]
 async fn test_http_mcp_server() -> Result<()> {
+    // Initialize tracing for debug output
+    let _ = tracing_subscriber::fmt()
+        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+        .try_init();
+        
     // Wrap entire test with timeout to prevent hanging
-    timeout(Duration::from_secs(30), async {
+    timeout(Duration::from_secs(15), async {
         let configs = vec![MCPServerConfig {
             name: "http".to_string(),
             transport: "stdio".to_string(),
             command: target_binary_path("http-mcp-server"),
             args: vec![],
-            retry_attempts: 2,
-            retry_delay_ms: 500,
+            retry_attempts: 1,
+            retry_delay_ms: 100,
             health_check_interval_secs: 30,
         }];
 
         // Create client with timeout
-        let client = timeout(Duration::from_secs(10), MCPClient::new(&configs)).await??;
+        let client = timeout(Duration::from_secs(3), MCPClient::new(&configs)).await??;
 
         // Wait a bit for initialization
         tokio::time::sleep(Duration::from_millis(500)).await;

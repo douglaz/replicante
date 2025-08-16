@@ -367,11 +367,12 @@ impl HttpMCPServer {
 
     /// Main server loop
     fn run(&mut self) -> Result<()> {
-        eprintln!("[HTTP MCP] HTTP MCP server started");
+        eprintln!("[HTTP MCP] HTTP MCP server started, PID: {}", std::process::id());
 
         let stdin = io::stdin();
         let reader = BufReader::new(stdin.lock());
 
+        eprintln!("[HTTP MCP] Starting main loop, waiting for input...");
         for line in reader.lines() {
             let line = line?;
             let line = line.trim();
@@ -418,6 +419,10 @@ impl HttpMCPServer {
 }
 
 fn main() -> Result<()> {
+    // Set stdout to line buffering for better subprocess communication
+    use std::io::Write;
+    std::io::stdout().flush().unwrap();
+    
     let mut server = HttpMCPServer::new();
 
     if let Err(e) = server.run() {

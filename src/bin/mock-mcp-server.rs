@@ -199,11 +199,12 @@ impl MockMCPServer {
 
     /// Main server loop - read from stdin, write to stdout
     fn run(&mut self) -> Result<()> {
-        eprintln!("[Mock MCP] Mock MCP server started");
+        eprintln!("[Mock MCP] Mock MCP server started, PID: {}", std::process::id());
 
         let stdin = io::stdin();
         let reader = BufReader::new(stdin.lock());
 
+        eprintln!("[Mock MCP] Starting main loop, waiting for input...");
         for line in reader.lines() {
             let line = line?;
             let line = line.trim();
@@ -250,6 +251,10 @@ impl MockMCPServer {
 }
 
 fn main() -> Result<()> {
+    // Set stdout to line buffering for better subprocess communication
+    use std::io::Write;
+    std::io::stdout().flush().unwrap();
+    
     let mut server = MockMCPServer::new();
 
     if let Err(e) = server.run() {
