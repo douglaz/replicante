@@ -10,7 +10,10 @@ use tracing::{error, info, warn};
 use uuid::Uuid;
 
 pub mod api;
+pub mod async_client;
+pub mod container_manager;
 pub mod daemon;
+pub mod log_stream;
 pub mod monitor;
 pub mod security;
 
