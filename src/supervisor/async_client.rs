@@ -43,7 +43,11 @@ pub struct AgentMetrics {
 }
 
 impl AsyncSupervisorClient {
-    pub fn new(base_url: String) -> Result<Self> {
+    pub fn new(base_url: Option<String>) -> Result<Self> {
+        let base_url = base_url.unwrap_or_else(|| {
+            std::env::var("SUPERVISOR_URL").unwrap_or_else(|_| "http://localhost:8080".to_string())
+        });
+
         let client = Client::builder()
             .timeout(Duration::from_secs(30))
             .build()
@@ -165,5 +169,71 @@ impl AsyncSupervisorClient {
                 Ok(false)
             }
         }
+    }
+
+    pub async fn kill_agent(&self, agent_id: &str) -> Result<()> {
+        let url = format!("{}/api/agents/{}/kill", self.base_url, agent_id);
+
+        let response = self
+            .client
+            .post(&url)
+            .send()
+            .await
+            .context("Failed to send kill request")?;
+
+        if !response.status().is_success() {
+            let status = response.status();
+            let text = response.text().await.unwrap_or_default();
+            error!("Kill request failed with {status}: {text}");
+            anyhow::bail!("Kill request failed with {status}");
+        }
+
+        info!("Successfully killed agent {agent_id}");
+        Ok(())
+    }
+
+    pub async fn get_logs(
+        &self,
+        agent_id: &str,
+        _follow: bool,
+        tail: Option<usize>,
+    ) -> Result<String> {
+        let mut url = format!("{}/api/agents/{}/logs", self.base_url, agent_id);
+
+        if let Some(tail) = tail {
+            url = format!("{}?tail={}", url, tail);
+        }
+
+        let response = self
+            .client
+            .get(&url)
+            .send()
+            .await
+            .context("Failed to fetch logs")?;
+
+        if !response.status().is_success() {
+            let status = response.status();
+            let text = response.text().await.unwrap_or_default();
+            error!("Get logs failed with {status}: {text}");
+            anyhow::bail!("Get logs failed with {status}");
+        }
+
+        let logs = response.text().await.context("Failed to read logs")?;
+        Ok(logs)
+    }
+
+    pub async fn get_logs_stream(
+        &self,
+        agent_id: &str,
+        _follow: bool,
+        tail: Option<usize>,
+    ) -> Result<impl futures::Stream<Item = Result<String>>> {
+        // For now, return a simple stream that reads the logs once
+        // A full SSE implementation would require a different approach
+        let logs = self.get_logs(agent_id, false, tail).await?;
+
+        let stream = futures::stream::once(async move { Ok(logs) });
+
+        Ok(stream)
     }
 }

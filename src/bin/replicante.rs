@@ -176,23 +176,54 @@ async fn main() -> Result<()> {
                     supervisor_config.web_port = Some(port);
                 }
 
-                let daemon = supervisor::daemon::Daemon::new(config).await?;
+                let daemon = supervisor::daemon::Daemon::new_with_config(supervisor_config).await?;
                 daemon.run().await?;
             }
 
             SupervisorCommands::Status => {
-                println!("Supervisor status:");
-                println!("Not yet implemented - would connect to running supervisor");
+                // Use the async supervisor client to get status
+                let client =
+                    replicante::supervisor::async_client::AsyncSupervisorClient::new(None)?;
+                match client.get_status().await {
+                    Ok(status) => {
+                        println!("Supervisor Status:");
+                        println!("Total agents: {}", status.total_agents);
+                        println!("Running agents: {}", status.running_agents);
+                        if !status.agents.is_empty() {
+                            println!("\nAgents:");
+                            for agent in status.agents {
+                                println!(
+                                    "  - {} [{}] (started: {})",
+                                    agent.id, agent.status, agent.started_at
+                                );
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("Failed to get supervisor status: {}", e);
+                        eprintln!(
+                            "Is the supervisor running? Check SUPERVISOR_URL environment variable."
+                        );
+                    }
+                }
             }
 
             SupervisorCommands::Stop { agent_id } => {
-                println!("Stopping agent: {}", agent_id);
-                println!("Not yet implemented - would send stop command to supervisor");
+                let client =
+                    replicante::supervisor::async_client::AsyncSupervisorClient::new(None)?;
+                match client.stop_agent(&agent_id).await {
+                    Ok(_) => println!("Successfully stopped agent: {}", agent_id),
+                    Err(e) => eprintln!("Failed to stop agent: {}", e),
+                }
             }
 
             SupervisorCommands::Kill { agent_id } => {
-                println!("Emergency stopping agent: {}", agent_id);
-                println!("Not yet implemented - would send kill command to supervisor");
+                let client =
+                    replicante::supervisor::async_client::AsyncSupervisorClient::new(None)?;
+                match client.kill_agent(&agent_id).await {
+                    Ok(_) => println!("Successfully killed agent: {}", agent_id),
+                    Err(e) => eprintln!("Failed to kill agent: {}", e),
+                }
             }
 
             SupervisorCommands::Quarantine { agent_id } => {
@@ -201,11 +232,33 @@ async fn main() -> Result<()> {
             }
 
             SupervisorCommands::Logs { agent_id, follow } => {
-                println!("Showing logs for agent: {}", agent_id);
+                let client =
+                    replicante::supervisor::async_client::AsyncSupervisorClient::new(None)?;
                 if follow {
-                    println!("Following log output...");
+                    // Use streaming for follow mode
+                    use futures::StreamExt;
+                    match client.get_logs_stream(&agent_id, true, Some(100)).await {
+                        Ok(stream) => {
+                            println!("Following logs for agent {}...", agent_id);
+                            futures::pin_mut!(stream);
+                            while let Some(chunk) = stream.next().await {
+                                match chunk {
+                                    Ok(log) => print!("{}", log),
+                                    Err(e) => {
+                                        eprintln!("Stream error: {}", e);
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                        Err(e) => eprintln!("Failed to get logs stream: {}", e),
+                    }
+                } else {
+                    match client.get_logs(&agent_id, false, Some(100)).await {
+                        Ok(logs) => println!("{}", logs),
+                        Err(e) => eprintln!("Failed to get logs: {}", e),
+                    }
                 }
-                println!("Not yet implemented - would stream logs from supervisor");
             }
         },
 

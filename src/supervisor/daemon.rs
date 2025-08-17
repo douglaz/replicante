@@ -29,6 +29,15 @@ impl Daemon {
         })
     }
 
+    pub async fn new_with_config(config: SupervisorConfig) -> Result<Self> {
+        let supervisor = Supervisor::new(config).await?;
+
+        Ok(Self {
+            supervisor,
+            _config_path: None,
+        })
+    }
+
     pub async fn run(&self) -> Result<()> {
         info!("Starting supervisor daemon");
 
