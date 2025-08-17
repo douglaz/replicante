@@ -47,11 +47,15 @@
           };
         };
         
-        # Static musl build - following cyberkrill pattern exactly
+        # Static musl build - following cyberkrill approach exactly
         packages.replicante-static = let
+          rustToolchainMusl = pkgs.rust-bin.stable.latest.default.override {
+            extensions = [ "rust-src" ];
+            targets = [ "x86_64-unknown-linux-musl" ];
+          };
           rustPlatformMusl = pkgs.makeRustPlatform {
-            cargo = rustToolchain;
-            rustc = rustToolchain;
+            cargo = rustToolchainMusl;
+            rustc = rustToolchainMusl;
           };
         in rustPlatformMusl.buildRustPackage {
           pname = "replicante-static";
@@ -64,7 +68,7 @@
           
           nativeBuildInputs = with pkgs; [
             pkg-config
-            rustToolchain
+            rustToolchainMusl
             pkgsStatic.stdenv.cc
           ];
           
@@ -72,28 +76,54 @@
             sqlite
           ];
           
-          # Force cargo to use the musl target
-          CARGO_BUILD_TARGET = "x86_64-unknown-linux-musl";
+          # Environment variables for static SQLite
+          SQLITE3_LIB_DIR = "${pkgs.pkgsStatic.sqlite.out}/lib";
+          SQLITE3_INCLUDE_DIR = "${pkgs.pkgsStatic.sqlite.dev}/include";
+          SQLITE3_STATIC = "1";
+          PKG_CONFIG_PATH = "${pkgs.pkgsStatic.sqlite.dev}/lib/pkgconfig";
+          
+          # Force cargo to use the musl target from .cargo/config.toml
           CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER = "${pkgs.pkgsStatic.stdenv.cc}/bin/${pkgs.pkgsStatic.stdenv.cc.targetPrefix}cc";
           CC_x86_64_unknown_linux_musl = "${pkgs.pkgsStatic.stdenv.cc}/bin/${pkgs.pkgsStatic.stdenv.cc.targetPrefix}cc";
           CARGO_BUILD_RUSTFLAGS = "-C target-feature=+crt-static -C link-arg=-static";
           
-          # Use system SQLite
-          SQLITE3_LIB_DIR = "${pkgs.pkgsStatic.sqlite.out}/lib";
-          SQLITE3_INCLUDE_DIR = "${pkgs.pkgsStatic.sqlite.dev}/include";
-          SQLITE3_STATIC = "1";
-          
-          # Override cargo target dir to use musl subdirectory
-          preBuild = ''
-            export CARGO_TARGET_DIR="target"
+          # Override buildPhase to use the correct target
+          buildPhase = ''
+            runHook preBuild
+            
+            echo "Building with musl target for static linking..."
+            cargo build \
+              --release \
+              --target x86_64-unknown-linux-musl \
+              --offline \
+              -j $NIX_BUILD_CORES
+            
+            runHook postBuild
           '';
           
+          installPhase = ''
+            runHook preInstall
+            
+            mkdir -p $out/bin
+            cp target/x86_64-unknown-linux-musl/release/replicante $out/bin/
+            
+            runHook postInstall
+          '';
+          
+          # Ensure static linking
           doCheck = false; # Tests don't work well with static linking
           
           # Verify the binary is statically linked
           postInstall = ''
             echo "Checking if binary is statically linked..."
             file $out/bin/replicante
+            if ldd $out/bin/replicante 2>&1 | grep -E "(not a dynamic executable|statically linked)"; then
+              echo "✅ Binary is statically linked"
+            else
+              echo "❌ Binary is dynamically linked:"
+              ldd $out/bin/replicante || true
+              exit 1
+            fi
             # Strip the binary to reduce size
             ${pkgs.binutils}/bin/strip $out/bin/replicante
           '';
@@ -116,7 +146,7 @@
           # Ollama setup app
           ollama-setup = {
             type = "app";
-            program = pkgs.writeShellScript "ollama-setup" ''
+            program = "${pkgs.writeShellScript "ollama-setup" ''
               set -e
               
               echo "🤖 Replicante Ollama Setup"
@@ -198,13 +228,13 @@
               echo ""
               echo "🗄️  View assistant's thoughts:"
               echo "   sqlite3 replicante-ollama.db \"SELECT * FROM decisions ORDER BY created_at DESC LIMIT 5;\""
-            '';
+            ''}";
           };
           
           # Quick Ollama start with Nix
           ollama-nix = {
             type = "app";
-            program = pkgs.writeShellScript "ollama-nix" ''
+            program = "${pkgs.writeShellScript "ollama-nix" ''
               set -e
               
               echo "🤖 Starting Replicante with Ollama (Nix)"
@@ -237,7 +267,7 @@
               
               # Run in development mode
               nix develop -c cargo run --release
-            '';
+            ''}";
           };
         };
 
