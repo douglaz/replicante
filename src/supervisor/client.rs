@@ -1,0 +1,186 @@
+use anyhow::{Context, Result, bail};
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Clone)]
+pub struct SupervisorClient {
+    base_url: String,
+    client: reqwest::blocking::Client,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct SpawnAgentRequest {
+    pub config_path: String,
+    pub sandbox_mode: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct SpawnAgentResponse {
+    pub agent_id: String,
+    pub status: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct AgentInfo {
+    pub id: String,
+    pub status: String,
+    pub started_at: String,
+    pub container_id: Option<String>,
+    pub config_path: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct StatusResponse {
+    pub agents: Vec<AgentInfo>,
+    pub total_agents: usize,
+    pub running_agents: usize,
+}
+
+impl SupervisorClient {
+    pub fn new(base_url: Option<String>) -> Result<Self> {
+        let base_url = base_url.unwrap_or_else(|| {
+            std::env::var("SUPERVISOR_URL").unwrap_or_else(|_| "http://localhost:8080".to_string())
+        });
+
+        let client = reqwest::blocking::Client::builder()
+            .timeout(std::time::Duration::from_secs(30))
+            .build()
+            .context("Failed to create HTTP client")?;
+
+        Ok(Self { base_url, client })
+    }
+
+    pub fn spawn_agent(&self, config_path: &str, sandbox_mode: Option<&str>) -> Result<String> {
+        let request = SpawnAgentRequest {
+            config_path: config_path.to_string(),
+            sandbox_mode: sandbox_mode.map(|s| s.to_string()),
+        };
+
+        let response = self
+            .client
+            .post(format!("{}/api/agents", self.base_url))
+            .json(&request)
+            .send()
+            .context("Failed to send spawn request")?;
+
+        if !response.status().is_success() {
+            let error: String = response
+                .text()
+                .unwrap_or_else(|_| "Unknown error".to_string());
+            bail!("Failed to spawn agent: {}", error);
+        }
+
+        let result: SpawnAgentResponse =
+            response.json().context("Failed to parse spawn response")?;
+
+        Ok(result.agent_id)
+    }
+
+    pub fn list_agents(&self) -> Result<Vec<AgentInfo>> {
+        let response = self
+            .client
+            .get(format!("{}/api/agents", self.base_url))
+            .send()
+            .context("Failed to list agents")?;
+
+        if !response.status().is_success() {
+            bail!("Failed to list agents: {}", response.status());
+        }
+
+        let agents: Vec<AgentInfo> = response.json().context("Failed to parse agents list")?;
+
+        Ok(agents)
+    }
+
+    pub fn get_status(&self) -> Result<StatusResponse> {
+        let response = self
+            .client
+            .get(format!("{}/api/status", self.base_url))
+            .send()
+            .context("Failed to get status")?;
+
+        if !response.status().is_success() {
+            bail!("Failed to get status: {}", response.status());
+        }
+
+        let status: StatusResponse = response.json().context("Failed to parse status")?;
+
+        Ok(status)
+    }
+
+    pub fn stop_agent(&self, agent_id: &str) -> Result<()> {
+        let response = self
+            .client
+            .post(format!("{}/api/agents/{}/stop", self.base_url, agent_id))
+            .send()
+            .context("Failed to stop agent")?;
+
+        if !response.status().is_success() {
+            let error: String = response
+                .text()
+                .unwrap_or_else(|_| "Unknown error".to_string());
+            bail!("Failed to stop agent: {}", error);
+        }
+
+        Ok(())
+    }
+
+    pub fn kill_agent(&self, agent_id: &str) -> Result<()> {
+        let response = self
+            .client
+            .post(format!("{}/api/agents/{}/kill", self.base_url, agent_id))
+            .send()
+            .context("Failed to kill agent")?;
+
+        if !response.status().is_success() {
+            let error: String = response
+                .text()
+                .unwrap_or_else(|_| "Unknown error".to_string());
+            bail!("Failed to kill agent: {}", error);
+        }
+
+        Ok(())
+    }
+
+    pub fn remove_agent(&self, agent_id: &str) -> Result<()> {
+        let response = self
+            .client
+            .delete(format!("{}/api/agents/{}", self.base_url, agent_id))
+            .send()
+            .context("Failed to remove agent")?;
+
+        if !response.status().is_success() {
+            let error: String = response
+                .text()
+                .unwrap_or_else(|_| "Unknown error".to_string());
+            bail!("Failed to remove agent: {}", error);
+        }
+
+        Ok(())
+    }
+
+    pub fn get_logs(&self, agent_id: &str, follow: bool, tail: Option<usize>) -> Result<String> {
+        let mut url = format!("{}/api/agents/{}/logs", self.base_url, agent_id);
+
+        let mut params = vec![];
+        if follow {
+            params.push("follow=true".to_string());
+        }
+        if let Some(tail) = tail {
+            params.push(format!("tail={}", tail));
+        }
+
+        if !params.is_empty() {
+            url.push('?');
+            url.push_str(&params.join("&"));
+        }
+
+        let response = self.client.get(&url).send().context("Failed to get logs")?;
+
+        if !response.status().is_success() {
+            bail!("Failed to get logs: {}", response.status());
+        }
+
+        let logs = response.text().context("Failed to read logs")?;
+        Ok(logs)
+    }
+}

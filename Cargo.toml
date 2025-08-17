@@ -10,8 +10,8 @@ license = "MIT"
 # Core async runtime
 tokio = { version = "1.41", features = ["full"] }
 
-# HTTP client for LLM APIs
-reqwest = { version = "0.11", default-features = false, features = ["rustls-tls", "json"] }
+# HTTP client for LLM APIs and supervisor client
+reqwest = { version = "0.11", default-features = false, features = ["rustls-tls", "json", "blocking"] }
 
 # Database
 rusqlite = { version = "0.30", features = [] }
@@ -66,6 +66,9 @@ rand = "0.8"
 
 # Command-line argument parsing
 clap = { version = "4.5", features = ["derive", "env"] }
+
+# Docker API client
+bollard = { version = "0.15", features = ["time", "ssl"] }
 
 # Unix system operations (for resource limits)
 [target.'cfg(unix)'.dependencies]

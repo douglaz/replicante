@@ -4,9 +4,12 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tracing::{error, info};
-use warp::{Filter, Rejection, Reply};
+use warp::{Filter, Rejection, Reply, http::StatusCode};
 
-use super::{AgentProcess, Monitor};
+use super::{
+    AgentProcess, FilesystemRestrictions, MCPRestrictions, Monitor, NetworkMode,
+    NetworkRestrictions, ResourceLimits, SandboxConfig, SandboxMode, Supervisor,
+};
 
 #[derive(Debug, Serialize, Deserialize)]
 struct StatusResponse {
@@ -38,16 +41,40 @@ struct AlertsResponse {
     alerts: Vec<super::monitor::Alert>,
 }
 
-pub async fn start_dashboard_server(
-    port: u16,
-    agents: Arc<RwLock<HashMap<String, AgentProcess>>>,
-    monitor: Arc<Monitor>,
-) -> Result<()> {
+#[derive(Debug, Serialize, Deserialize)]
+struct SpawnAgentRequest {
+    config_path: String,
+    sandbox_mode: Option<String>, // "strict", "moderate", "permissive"
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct SpawnAgentResponse {
+    agent_id: String,
+    status: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct AgentActionResponse {
+    success: bool,
+    message: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct ErrorResponse {
+    error: String,
+}
+
+pub async fn start_dashboard_server(port: u16, supervisor: Arc<Supervisor>) -> Result<()> {
     info!("Starting dashboard server on port {port}");
 
-    // Clone for move into async block
+    // Get references from supervisor
+    let agents = supervisor.get_agents_ref();
+    let monitor = supervisor.get_monitor_ref();
+
+    // Clone for move into async blocks
     let agents_clone = agents.clone();
     let monitor_clone = monitor.clone();
+    let supervisor_clone = supervisor.clone();
 
     // Status endpoint
     let status = warp::path("api")
@@ -77,6 +104,62 @@ pub async fn start_dashboard_server(
         .and(with_monitor(monitor_clone.clone()))
         .and_then(handle_alerts);
 
+    // Agent management endpoints
+
+    // POST /api/agents - Spawn new agent
+    let spawn_agent = warp::path("api")
+        .and(warp::path("agents"))
+        .and(warp::post())
+        .and(warp::body::json())
+        .and(with_supervisor(supervisor_clone.clone()))
+        .and_then(handle_spawn_agent);
+
+    // GET /api/agents - List all agents
+    let list_agents = warp::path("api")
+        .and(warp::path("agents"))
+        .and(warp::get())
+        .and(with_agents(agents_clone.clone()))
+        .and_then(handle_list_agents);
+
+    // POST /api/agents/{id}/stop - Stop agent
+    let stop_agent = warp::path("api")
+        .and(warp::path("agents"))
+        .and(warp::path::param::<String>())
+        .and(warp::path("stop"))
+        .and(warp::post())
+        .and(with_supervisor(supervisor_clone.clone()))
+        .and_then(handle_stop_agent);
+
+    // POST /api/agents/{id}/kill - Kill agent
+    let kill_agent = warp::path("api")
+        .and(warp::path("agents"))
+        .and(warp::path::param::<String>())
+        .and(warp::path("kill"))
+        .and(warp::post())
+        .and(with_supervisor(supervisor_clone.clone()))
+        .and_then(handle_kill_agent);
+
+    // DELETE /api/agents/{id} - Remove agent
+    let remove_agent = warp::path("api")
+        .and(warp::path("agents"))
+        .and(warp::path::param::<String>())
+        .and(warp::delete())
+        .and(with_supervisor(supervisor_clone.clone()))
+        .and_then(handle_remove_agent);
+
+    // GET /api/agents/{id}/logs - Get agent logs
+    let agent_logs = warp::path("api")
+        .and(warp::path("agents"))
+        .and(warp::path::param::<String>())
+        .and(warp::path("logs"))
+        .and(warp::get())
+        .and(warp::query::<LogsQuery>())
+        .and(with_supervisor(supervisor_clone.clone()))
+        .and_then(handle_agent_logs);
+
+    // GET /api/agents/{id}/logs/stream - Stream agent logs (SSE)
+    let log_stream = super::log_stream::log_stream_route(supervisor_clone.clone());
+
     // Static files for dashboard UI
     let dashboard = warp::path::end()
         .and(warp::get())
@@ -87,6 +170,13 @@ pub async fn start_dashboard_server(
         .or(metrics)
         .or(events)
         .or(alerts)
+        .or(spawn_agent)
+        .or(list_agents)
+        .or(stop_agent)
+        .or(kill_agent)
+        .or(remove_agent)
+        .or(agent_logs)
+        .or(log_stream)
         .or(dashboard)
         .with(warp::cors().allow_any_origin());
 
@@ -111,6 +201,18 @@ fn with_monitor(
     monitor: Arc<Monitor>,
 ) -> impl Filter<Extract = (Arc<Monitor>,), Error = std::convert::Infallible> + Clone {
     warp::any().map(move || monitor.clone())
+}
+
+fn with_supervisor(
+    supervisor: Arc<Supervisor>,
+) -> impl Filter<Extract = (Arc<Supervisor>,), Error = std::convert::Infallible> + Clone {
+    warp::any().map(move || supervisor.clone())
+}
+
+#[derive(Debug, Deserialize)]
+struct LogsQuery {
+    follow: Option<bool>,
+    tail: Option<usize>,
 }
 
 async fn handle_status(
@@ -169,6 +271,273 @@ async fn handle_alerts(monitor: Arc<Monitor>) -> Result<impl Reply, Rejection> {
     let response = AlertsResponse { alerts };
 
     Ok(warp::reply::json(&response))
+}
+
+async fn handle_spawn_agent(
+    request: SpawnAgentRequest,
+    supervisor: Arc<Supervisor>,
+) -> Result<warp::reply::WithStatus<warp::reply::Json>, Rejection> {
+    // Parse sandbox mode if provided
+    let sandbox_config = if let Some(mode_str) = request.sandbox_mode {
+        let mode = match mode_str.to_lowercase().as_str() {
+            "strict" => SandboxMode::Strict,
+            "moderate" => SandboxMode::Moderate,
+            "permissive" => SandboxMode::Permissive,
+            _ => SandboxMode::Moderate,
+        };
+
+        Some(SandboxConfig {
+            enabled: true,
+            mode,
+            filesystem: FilesystemRestrictions {
+                root: "/app".to_string(),
+                read_only_paths: vec![],
+                write_paths: vec!["/app/data".to_string()],
+                max_size_mb: 100,
+            },
+            network: NetworkRestrictions {
+                mode: NetworkMode::Filtered,
+                allowed_domains: vec![],
+                blocked_ports: vec![],
+                rate_limit_per_minute: Some(100),
+            },
+            resources: ResourceLimits {
+                max_memory_mb: 512,
+                max_cpu_percent: 50.0,
+                max_processes: 10,
+                max_open_files: 100,
+            },
+            mcp: MCPRestrictions {
+                allowed_servers: vec![],
+                blocked_tools: vec![],
+                tool_rate_limits: HashMap::new(),
+            },
+        })
+    } else {
+        None
+    };
+
+    match supervisor
+        .spawn_agent(request.config_path, sandbox_config)
+        .await
+    {
+        Ok(agent_id) => {
+            let response = SpawnAgentResponse {
+                agent_id,
+                status: "Starting".to_string(),
+            };
+            Ok(warp::reply::with_status(
+                warp::reply::json(&response),
+                StatusCode::OK,
+            ))
+        }
+        Err(e) => {
+            error!("Failed to spawn agent: {e}");
+            let error_response = ErrorResponse {
+                error: e.to_string(),
+            };
+            Ok(warp::reply::with_status(
+                warp::reply::json(&error_response),
+                StatusCode::INTERNAL_SERVER_ERROR,
+            ))
+        }
+    }
+}
+
+async fn handle_list_agents(
+    agents: Arc<RwLock<HashMap<String, AgentProcess>>>,
+) -> Result<impl Reply, Rejection> {
+    let agents_guard = agents.read().await;
+
+    let agent_list: Vec<super::client::AgentInfo> = agents_guard
+        .values()
+        .map(|agent| super::client::AgentInfo {
+            id: agent.id.clone(),
+            status: format!("{:?}", agent.status),
+            started_at: agent.started_at.to_rfc3339(),
+            container_id: agent.container_id.clone(),
+            config_path: agent.config_path.clone(),
+        })
+        .collect();
+
+    Ok(warp::reply::json(&agent_list))
+}
+
+async fn handle_stop_agent(
+    agent_id: String,
+    supervisor: Arc<Supervisor>,
+) -> Result<warp::reply::WithStatus<warp::reply::Json>, Rejection> {
+    match supervisor.stop_agent(&agent_id).await {
+        Ok(_) => {
+            let response = AgentActionResponse {
+                success: true,
+                message: format!("Agent {} stopped successfully", agent_id),
+            };
+            Ok(warp::reply::with_status(
+                warp::reply::json(&response),
+                StatusCode::OK,
+            ))
+        }
+        Err(e) => {
+            error!("Failed to stop agent {agent_id}: {e}");
+            let error_response = ErrorResponse {
+                error: e.to_string(),
+            };
+            Ok(warp::reply::with_status(
+                warp::reply::json(&error_response),
+                StatusCode::INTERNAL_SERVER_ERROR,
+            ))
+        }
+    }
+}
+
+async fn handle_kill_agent(
+    agent_id: String,
+    supervisor: Arc<Supervisor>,
+) -> Result<warp::reply::WithStatus<warp::reply::Json>, Rejection> {
+    match supervisor.emergency_stop(&agent_id).await {
+        Ok(_) => {
+            let response = AgentActionResponse {
+                success: true,
+                message: format!("Agent {} killed successfully", agent_id),
+            };
+            Ok(warp::reply::with_status(
+                warp::reply::json(&response),
+                StatusCode::OK,
+            ))
+        }
+        Err(e) => {
+            error!("Failed to kill agent {agent_id}: {e}");
+            let error_response = ErrorResponse {
+                error: e.to_string(),
+            };
+            Ok(warp::reply::with_status(
+                warp::reply::json(&error_response),
+                StatusCode::INTERNAL_SERVER_ERROR,
+            ))
+        }
+    }
+}
+
+async fn handle_remove_agent(
+    agent_id: String,
+    supervisor: Arc<Supervisor>,
+) -> Result<warp::reply::WithStatus<warp::reply::Json>, Rejection> {
+    // First stop the agent if running
+    let _ = supervisor.stop_agent(&agent_id).await;
+
+    // Remove from agents map
+    let agents_ref = supervisor.get_agents_ref();
+    let mut agents = agents_ref.write().await;
+    if agents.remove(&agent_id).is_some() {
+        let response = AgentActionResponse {
+            success: true,
+            message: format!("Agent {} removed successfully", agent_id),
+        };
+        Ok(warp::reply::with_status(
+            warp::reply::json(&response),
+            StatusCode::OK,
+        ))
+    } else {
+        let error_response = ErrorResponse {
+            error: format!("Agent {} not found", agent_id),
+        };
+        Ok(warp::reply::with_status(
+            warp::reply::json(&error_response),
+            StatusCode::NOT_FOUND,
+        ))
+    }
+}
+
+async fn handle_agent_logs(
+    agent_id: String,
+    query: LogsQuery,
+    supervisor: Arc<Supervisor>,
+) -> Result<impl Reply, Rejection> {
+    // Get container ID and manager reference for the agent
+    let agents_ref = supervisor.get_agents_ref();
+    let agents = agents_ref.read().await;
+
+    if let Some(agent) = agents.get(&agent_id) {
+        if let Some(container_id) = &agent.container_id {
+            let container_id = container_id.clone();
+            drop(agents); // Release the lock
+
+            // Get container manager reference
+            let container_manager = supervisor.get_container_manager_ref();
+
+            // Fetch logs from container
+            let follow = query.follow.unwrap_or(false);
+            let tail = query.tail.map(|n| n.to_string());
+
+            if follow {
+                // For streaming logs, we need to return a stream response
+                // This is a simplified version - in production you'd use Server-Sent Events or WebSocket
+                use futures::StreamExt;
+
+                match container_manager
+                    .stream_container_logs(&container_id, true, tail)
+                    .await
+                {
+                    Ok(mut stream) => {
+                        let mut logs = String::new();
+                        // Collect first batch of logs (for simplicity in this implementation)
+                        for _ in 0..100 {
+                            if let Some(Ok(log)) = stream.next().await {
+                                logs.push_str(&log);
+                                logs.push('\n');
+                            } else {
+                                break;
+                            }
+                        }
+                        Ok(warp::reply::with_status(logs, StatusCode::OK))
+                    }
+                    Err(e) => Ok(warp::reply::with_status(
+                        format!("Failed to fetch logs: {}", e),
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                    )),
+                }
+            } else {
+                // For non-streaming, fetch all available logs
+                match container_manager
+                    .stream_container_logs(&container_id, false, tail)
+                    .await
+                {
+                    Ok(mut stream) => {
+                        use futures::StreamExt;
+                        let mut logs = String::new();
+                        while let Some(result) = stream.next().await {
+                            match result {
+                                Ok(log) => {
+                                    logs.push_str(&log);
+                                    logs.push('\n');
+                                }
+                                Err(e) => {
+                                    error!("Error reading log: {}", e);
+                                    break;
+                                }
+                            }
+                        }
+                        Ok(warp::reply::with_status(logs, StatusCode::OK))
+                    }
+                    Err(e) => Ok(warp::reply::with_status(
+                        format!("Failed to fetch logs: {}", e),
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                    )),
+                }
+            }
+        } else {
+            Ok(warp::reply::with_status(
+                format!("No container found for agent {}", agent_id),
+                StatusCode::NOT_FOUND,
+            ))
+        }
+    } else {
+        Ok(warp::reply::with_status(
+            format!("Agent {} not found", agent_id),
+            StatusCode::NOT_FOUND,
+        ))
+    }
 }
 
 // Basic dashboard HTML

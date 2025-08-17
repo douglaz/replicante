@@ -1,12 +1,13 @@
 use anyhow::{Context, Result};
 use std::path::PathBuf;
+use std::sync::Arc;
 use tokio::signal;
 use tracing::{error, info};
 
 use super::{Supervisor, SupervisorConfig};
 
 pub struct Daemon {
-    supervisor: Supervisor,
+    supervisor: Arc<Supervisor>,
     _config_path: Option<PathBuf>,
 }
 
@@ -21,11 +22,15 @@ impl Daemon {
             SupervisorConfig::default()
         };
 
-        let supervisor = Supervisor::new(config).await?;
+        Self::new_with_config(config).await
+    }
+
+    pub async fn new_with_config(config: SupervisorConfig) -> Result<Self> {
+        let supervisor = Arc::new(Supervisor::new(config).await?);
 
         Ok(Self {
             supervisor,
-            _config_path: config_path,
+            _config_path: None,
         })
     }
 
@@ -33,7 +38,7 @@ impl Daemon {
         info!("Starting supervisor daemon");
 
         // Start the supervisor
-        self.supervisor.start().await?;
+        self.supervisor.clone().start().await?;
 
         // Wait for shutdown signal
         let shutdown = Self::shutdown_signal();
