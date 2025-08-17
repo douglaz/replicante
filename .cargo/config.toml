@@ -1,1 +1,3 @@
-# Don't set default target - let CI/build scripts specify it explicitly
+# Set default target for static builds
+[build]
+target = "x86_64-unknown-linux-musl"
