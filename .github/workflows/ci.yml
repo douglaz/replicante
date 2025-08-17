@@ -72,7 +72,7 @@ jobs:
       run: nix develop -c cargo check --workspace --all-targets
     
     - name: Run clippy
-      run: nix develop -c cargo clippy --workspace --all-targets -- -D warnings
+      run: nix develop -c cargo clippy --workspace --all-targets --all-features -- --deny warnings
 
   # Test suite
   test:

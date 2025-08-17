@@ -174,7 +174,7 @@ git config core.hooksPath .githooks
 
 #### Automated Checks
 - **pre-commit**: Runs `cargo fmt --check` to ensure code is formatted
-- **pre-push**: Runs both `cargo fmt --check` and `cargo clippy -- -D warnings`
+- **pre-push**: Runs both `cargo fmt --check` and `cargo clippy --workspace --all-targets --all-features -- --deny warnings`
 
 #### Manual Checks
 ```bash
@@ -182,7 +182,7 @@ git config core.hooksPath .githooks
 cargo fmt
 
 # Run linter
-cargo clippy
+cargo clippy --workspace --all-targets --all-features -- --deny warnings
 
 # Run tests
 cargo test
