@@ -187,8 +187,14 @@ async fn main() -> Result<()> {
                 match client.get_status().await {
                     Ok(status) => {
                         println!("Supervisor Status:");
-                        println!("Total agents: {}", status.total_agents);
-                        println!("Running agents: {}", status.running_agents);
+                        println!(
+                            "Total agents: {total_agents}",
+                            total_agents = status.total_agents
+                        );
+                        println!(
+                            "Running agents: {running_agents}",
+                            running_agents = status.running_agents
+                        );
                         if !status.agents.is_empty() {
                             println!("\nAgents:");
                             for agent in status.agents {
@@ -200,7 +206,7 @@ async fn main() -> Result<()> {
                         }
                     }
                     Err(e) => {
-                        eprintln!("Failed to get supervisor status: {}", e);
+                        eprintln!("Failed to get supervisor status: {e}");
                         eprintln!(
                             "Is the supervisor running? Check SUPERVISOR_URL environment variable."
                         );
@@ -212,8 +218,8 @@ async fn main() -> Result<()> {
                 let client =
                     replicante::supervisor::async_client::AsyncSupervisorClient::new(None)?;
                 match client.stop_agent(&agent_id).await {
-                    Ok(_) => println!("Successfully stopped agent: {}", agent_id),
-                    Err(e) => eprintln!("Failed to stop agent: {}", e),
+                    Ok(_) => println!("Successfully stopped agent: {agent_id}"),
+                    Err(e) => eprintln!("Failed to stop agent: {e}"),
                 }
             }
 
@@ -221,13 +227,13 @@ async fn main() -> Result<()> {
                 let client =
                     replicante::supervisor::async_client::AsyncSupervisorClient::new(None)?;
                 match client.kill_agent(&agent_id).await {
-                    Ok(_) => println!("Successfully killed agent: {}", agent_id),
-                    Err(e) => eprintln!("Failed to kill agent: {}", e),
+                    Ok(_) => println!("Successfully killed agent: {agent_id}"),
+                    Err(e) => eprintln!("Failed to kill agent: {e}"),
                 }
             }
 
             SupervisorCommands::Quarantine { agent_id } => {
-                println!("Quarantining agent: {}", agent_id);
+                println!("Quarantining agent: {agent_id}");
                 println!("Not yet implemented - would send quarantine command to supervisor");
             }
 
@@ -239,24 +245,24 @@ async fn main() -> Result<()> {
                     use futures::StreamExt;
                     match client.get_logs_stream(&agent_id, true, Some(100)).await {
                         Ok(stream) => {
-                            println!("Following logs for agent {}...", agent_id);
+                            println!("Following logs for agent {agent_id}...");
                             futures::pin_mut!(stream);
                             while let Some(chunk) = stream.next().await {
                                 match chunk {
-                                    Ok(log) => print!("{}", log),
+                                    Ok(log) => print!("{log}"),
                                     Err(e) => {
-                                        eprintln!("Stream error: {}", e);
+                                        eprintln!("Stream error: {e}");
                                         break;
                                     }
                                 }
                             }
                         }
-                        Err(e) => eprintln!("Failed to get logs stream: {}", e),
+                        Err(e) => eprintln!("Failed to get logs stream: {e}"),
                     }
                 } else {
                     match client.get_logs(&agent_id, false, Some(100)).await {
-                        Ok(logs) => println!("{}", logs),
-                        Err(e) => eprintln!("Failed to get logs: {}", e),
+                        Ok(logs) => println!("{logs}"),
+                        Err(e) => eprintln!("Failed to get logs: {e}"),
                     }
                 }
             }
@@ -267,7 +273,7 @@ async fn main() -> Result<()> {
             info!("Note: Sandboxing is enforced at Docker/infrastructure level");
 
             if let Some(supervisor_url) = supervisor {
-                info!("Connecting to supervisor at: {}", supervisor_url);
+                info!("Connecting to supervisor at: {supervisor_url}");
             }
 
             run_sandboxed(config).await?;
@@ -277,26 +283,26 @@ async fn main() -> Result<()> {
             match command {
                 MonitorCommands::Metrics { agent_id, format } => {
                     if let Some(id) = agent_id {
-                        println!("Metrics for agent {}:", id);
+                        println!("Metrics for agent {id}:");
                     } else {
                         println!("Metrics for all agents:");
                     }
-                    println!("Format: {}", format);
+                    println!("Format: {format}");
                     println!("Not yet implemented - would fetch from supervisor");
                 }
 
                 MonitorCommands::Events { limit } => {
-                    println!("Recent {} events:", limit);
+                    println!("Recent {limit} events:");
                     println!("Not yet implemented - would fetch from supervisor");
                 }
 
                 MonitorCommands::Alerts { limit } => {
-                    println!("Recent {} alerts:", limit);
+                    println!("Recent {limit} alerts:");
                     println!("Not yet implemented - would fetch from supervisor");
                 }
 
                 MonitorCommands::Decisions { agent_id, last } => {
-                    println!("Last {} decisions for agent {}:", last, agent_id);
+                    println!("Last {last} decisions for agent {agent_id}:");
                     println!("Not yet implemented - would fetch from supervisor");
                 }
 
@@ -310,9 +316,9 @@ async fn main() -> Result<()> {
                 }
 
                 MonitorCommands::Dashboard { url } => {
-                    println!("Opening dashboard at: {}", url);
+                    println!("Opening dashboard at: {url}");
                     // Could use webbrowser crate to open in default browser
-                    println!("Please open {} in your browser", url);
+                    println!("Please open {url} in your browser");
                 }
             }
         }

@@ -57,7 +57,7 @@ impl AsyncSupervisorClient {
     }
 
     pub async fn get_status(&self) -> Result<StatusResponse> {
-        let url = format!("{}/api/status", self.base_url);
+        let url = format!("{base_url}/api/status", base_url = self.base_url);
         debug!("Fetching supervisor status from {url}");
 
         let response = self
@@ -80,15 +80,16 @@ impl AsyncSupervisorClient {
             .context("Failed to parse status response")?;
 
         info!(
-            "Retrieved status: {} agents ({} running)",
-            status.total_agents, status.running_agents
+            "Retrieved status: {total} agents ({running} running)",
+            total = status.total_agents,
+            running = status.running_agents
         );
 
         Ok(status)
     }
 
     pub async fn get_metrics(&self) -> Result<MetricsResponse> {
-        let url = format!("{}/api/metrics", self.base_url);
+        let url = format!("{base_url}/api/metrics", base_url = self.base_url);
         debug!("Fetching metrics from {url}");
 
         let response = self
@@ -110,13 +111,19 @@ impl AsyncSupervisorClient {
             .await
             .context("Failed to parse metrics response")?;
 
-        debug!("Retrieved metrics for {} agents", metrics.metrics.len());
+        debug!(
+            "Retrieved metrics for {count} agents",
+            count = metrics.metrics.len()
+        );
 
         Ok(metrics)
     }
 
     pub async fn stop_agent(&self, agent_id: &str) -> Result<()> {
-        let url = format!("{}/api/agents/{}/stop", self.base_url, agent_id);
+        let url = format!(
+            "{base_url}/api/agents/{agent_id}/stop",
+            base_url = self.base_url
+        );
         info!("Stopping agent {agent_id}");
 
         let response = self
@@ -138,7 +145,10 @@ impl AsyncSupervisorClient {
     }
 
     pub async fn quarantine_agent(&self, agent_id: &str) -> Result<()> {
-        let url = format!("{}/api/agents/{}/quarantine", self.base_url, agent_id);
+        let url = format!(
+            "{base_url}/api/agents/{agent_id}/quarantine",
+            base_url = self.base_url
+        );
         info!("Quarantining agent {agent_id}");
 
         let response = self
@@ -160,7 +170,7 @@ impl AsyncSupervisorClient {
     }
 
     pub async fn health_check(&self) -> Result<bool> {
-        let url = format!("{}/health", self.base_url);
+        let url = format!("{base_url}/health", base_url = self.base_url);
 
         match self.client.get(&url).send().await {
             Ok(response) => Ok(response.status().is_success()),
@@ -172,7 +182,10 @@ impl AsyncSupervisorClient {
     }
 
     pub async fn kill_agent(&self, agent_id: &str) -> Result<()> {
-        let url = format!("{}/api/agents/{}/kill", self.base_url, agent_id);
+        let url = format!(
+            "{base_url}/api/agents/{agent_id}/kill",
+            base_url = self.base_url
+        );
 
         let response = self
             .client
@@ -198,10 +211,13 @@ impl AsyncSupervisorClient {
         _follow: bool,
         tail: Option<usize>,
     ) -> Result<String> {
-        let mut url = format!("{}/api/agents/{}/logs", self.base_url, agent_id);
+        let mut url = format!(
+            "{base_url}/api/agents/{agent_id}/logs",
+            base_url = self.base_url
+        );
 
         if let Some(tail) = tail {
-            url = format!("{}?tail={}", url, tail);
+            url = format!("{url}?tail={tail}");
         }
 
         let response = self
