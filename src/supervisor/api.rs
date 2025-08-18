@@ -77,6 +77,20 @@ pub async fn start_dashboard_server(
         .and(with_monitor(monitor_clone.clone()))
         .and_then(handle_alerts);
 
+    // Shutdown endpoint
+    let shutdown = warp::path("api")
+        .and(warp::path("shutdown"))
+        .and(warp::post())
+        .map(move || {
+            info!("Shutdown request received");
+            // Send shutdown signal after response
+            tokio::spawn(async {
+                tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                std::process::exit(0);
+            });
+            warp::reply::json(&serde_json::json!({"status": "shutdown initiated"}))
+        });
+
     // Static files for dashboard UI
     let dashboard = warp::path::end()
         .and(warp::get())
@@ -87,6 +101,7 @@ pub async fn start_dashboard_server(
         .or(metrics)
         .or(events)
         .or(alerts)
+        .or(shutdown)
         .or(dashboard)
         .with(warp::cors().allow_any_origin());
 

@@ -63,14 +63,17 @@ enum SupervisorCommands {
     /// Show supervisor status
     Status,
 
+    /// Shutdown the supervisor daemon
+    Shutdown,
+
     /// Stop an agent
-    Stop {
+    StopAgent {
         /// Agent ID to stop
         agent_id: String,
     },
 
     /// Emergency stop an agent
-    Kill {
+    KillAgent {
         /// Agent ID to kill
         agent_id: String,
     },
@@ -214,7 +217,16 @@ async fn main() -> Result<()> {
                 }
             }
 
-            SupervisorCommands::Stop { agent_id } => {
+            SupervisorCommands::Shutdown => {
+                let client =
+                    replicante::supervisor::async_client::AsyncSupervisorClient::new(None)?;
+                match client.shutdown().await {
+                    Ok(_) => println!("Successfully sent shutdown signal to supervisor"),
+                    Err(e) => eprintln!("Failed to shutdown supervisor: {e}"),
+                }
+            }
+
+            SupervisorCommands::StopAgent { agent_id } => {
                 let client =
                     replicante::supervisor::async_client::AsyncSupervisorClient::new(None)?;
                 match client.stop_agent(&agent_id).await {
@@ -223,7 +235,7 @@ async fn main() -> Result<()> {
                 }
             }
 
-            SupervisorCommands::Kill { agent_id } => {
+            SupervisorCommands::KillAgent { agent_id } => {
                 let client =
                     replicante::supervisor::async_client::AsyncSupervisorClient::new(None)?;
                 match client.kill_agent(&agent_id).await {
