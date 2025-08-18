@@ -1,0 +1,12 @@
+# Test supervisor configuration with shorter intervals
+max_agents = 5
+monitor_interval_secs = 2  # Faster monitoring for testing
+web_port = 8080
+enable_dashboard = true
+log_level = "debug"  # More verbose logging for testing
+
+[alerts]
+max_cpu_percent = 80.0
+max_memory_mb = 256  # Lower limit for testing
+max_tool_calls_per_minute = 50
+suspicious_patterns = ["rm -rf", "curl | sh", "/etc/passwd"]

@@ -1,0 +1,12 @@
+# Test agent 1 configuration - Mock LLM
+database_path = "/data/test_agent_1.db"
+
+[llm]
+provider = "mock"
+model = "mock-model"
+
+[[mcp_servers]]
+name = "filesystem"
+transport = "stdio"
+command = "npx"
+args = ["-y", "@modelcontextprotocol/server-filesystem", "/sandbox"]

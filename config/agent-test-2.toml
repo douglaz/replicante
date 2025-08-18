@@ -1,0 +1,24 @@
+# Test Agent 2 Configuration
+database_path = "/data/agent-test-2.db"
+
+[agent]
+id = "test-agent-2"
+log_level = "info"
+initial_goals = """
+You are a second test agent for supervisor functionality.
+Your goals are:
+1. Test concurrent agent operation
+2. Use different resource limits
+3. Verify isolation from other agents
+"""
+
+[llm]
+provider = "mock"
+model = "test-model"
+
+# Use mock MCP server for testing
+[[mcp_servers]]
+name = "mock"
+transport = "stdio"
+command = "echo"
+args = ["mock-server-2"]

@@ -1,0 +1,8 @@
+# Test agent 3 configuration - For multi-agent testing
+database_path = "/data/test_agent_3.db"
+
+[llm]
+provider = "mock"
+model = "mock-model-3"
+
+# No MCP servers for this agent - minimal config

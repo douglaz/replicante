@@ -1,0 +1,24 @@
+# Test Agent 1 Configuration
+database_path = "/data/agent-test-1.db"
+
+[agent]
+id = "test-agent-1"
+log_level = "debug"
+initial_goals = """
+You are a test agent for supervisor functionality.
+Your goals are:
+1. Verify you can start successfully
+2. Test basic MCP tool usage
+3. Generate some log output for testing
+"""
+
+[llm]
+provider = "mock"
+model = "test-model"
+
+# Use mock MCP server for testing
+[[mcp_servers]]
+name = "mock"
+transport = "stdio"
+command = "echo"
+args = ["mock-server"]

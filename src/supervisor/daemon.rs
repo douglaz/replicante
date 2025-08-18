@@ -7,7 +7,6 @@ use super::{Supervisor, SupervisorConfig};
 
 pub struct Daemon {
     supervisor: Supervisor,
-    _config_path: Option<PathBuf>,
 }
 
 impl Daemon {
@@ -23,19 +22,13 @@ impl Daemon {
 
         let supervisor = Supervisor::new(config).await?;
 
-        Ok(Self {
-            supervisor,
-            _config_path: config_path,
-        })
+        Ok(Self { supervisor })
     }
 
     pub async fn new_with_config(config: SupervisorConfig) -> Result<Self> {
         let supervisor = Supervisor::new(config).await?;
 
-        Ok(Self {
-            supervisor,
-            _config_path: None,
-        })
+        Ok(Self { supervisor })
     }
 
     pub async fn run(&self) -> Result<()> {
