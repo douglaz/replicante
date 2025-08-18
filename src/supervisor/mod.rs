@@ -10,7 +10,10 @@ use tracing::{error, info, warn};
 use uuid::Uuid;
 
 pub mod api;
+pub mod async_client;
+pub mod container_manager;
 pub mod daemon;
+pub mod log_stream;
 pub mod monitor;
 pub mod security;
 
@@ -351,7 +354,7 @@ impl Default for SupervisorConfig {
         Self {
             max_agents: 10,
             monitor_interval_secs: 5,
-            web_port: Some(8080),
+            web_port: Some(8090),
             enable_dashboard: true,
             log_level: "info".to_string(),
             alerts: AlertConfig {
