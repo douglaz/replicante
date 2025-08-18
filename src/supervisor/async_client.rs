@@ -252,4 +252,26 @@ impl AsyncSupervisorClient {
 
         Ok(stream)
     }
+
+    pub async fn shutdown(&self) -> Result<()> {
+        let url = format!("{base_url}/api/shutdown", base_url = self.base_url);
+        info!("Sending shutdown signal to supervisor");
+
+        let response = self
+            .client
+            .post(&url)
+            .send()
+            .await
+            .context("Failed to send shutdown request")?;
+
+        if !response.status().is_success() {
+            let status = response.status();
+            let text = response.text().await.unwrap_or_default();
+            error!("Shutdown request failed with {status}: {text}");
+            anyhow::bail!("Shutdown request failed with {status}");
+        }
+
+        info!("Supervisor shutdown initiated");
+        Ok(())
+    }
 }
