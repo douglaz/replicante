@@ -138,7 +138,7 @@ enum MonitorCommands {
     /// Open web dashboard
     Dashboard {
         /// Dashboard URL
-        #[arg(default_value = "http://localhost:8080")]
+        #[arg(default_value = "http://localhost:8090")]
         url: String,
     },
 }

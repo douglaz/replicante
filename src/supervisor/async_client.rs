@@ -45,7 +45,7 @@ pub struct AgentMetrics {
 impl AsyncSupervisorClient {
     pub fn new(base_url: Option<String>) -> Result<Self> {
         let base_url = base_url.unwrap_or_else(|| {
-            std::env::var("SUPERVISOR_URL").unwrap_or_else(|_| "http://localhost:8080".to_string())
+            std::env::var("SUPERVISOR_URL").unwrap_or_else(|_| "http://localhost:8090".to_string())
         });
 
         let client = Client::builder()
