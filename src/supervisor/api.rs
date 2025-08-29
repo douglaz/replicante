@@ -1,10 +1,18 @@
 use anyhow::Result;
+use axum::{
+    Router,
+    extract::State,
+    http::StatusCode,
+    response::{Html, IntoResponse, Json},
+    routing::{get, post},
+};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::sync::RwLock;
+use tower_http::cors::CorsLayer;
 use tracing::{error, info};
-use warp::{Filter, Rejection, Reply};
 
 use super::{AgentProcess, Monitor};
 
@@ -38,6 +46,12 @@ struct AlertsResponse {
     alerts: Vec<super::monitor::Alert>,
 }
 
+#[derive(Clone)]
+struct AppState {
+    agents: Arc<RwLock<HashMap<String, AgentProcess>>>,
+    monitor: Arc<Monitor>,
+}
+
 pub async fn start_dashboard_server(
     port: u16,
     agents: Arc<RwLock<HashMap<String, AgentProcess>>>,
@@ -45,93 +59,35 @@ pub async fn start_dashboard_server(
 ) -> Result<()> {
     info!("Starting dashboard server on port {port}");
 
-    // Clone for move into async block
-    let agents_clone = agents.clone();
-    let monitor_clone = monitor.clone();
+    let state = AppState { agents, monitor };
 
-    // Status endpoint
-    let status = warp::path("api")
-        .and(warp::path("status"))
-        .and(warp::get())
-        .and(with_agents(agents_clone.clone()))
-        .and_then(handle_status);
+    let app = Router::new()
+        .route("/api/status", get(handle_status))
+        .route("/api/metrics", get(handle_metrics))
+        .route("/api/events", get(handle_events))
+        .route("/api/alerts", get(handle_alerts))
+        .route("/api/shutdown", post(handle_shutdown))
+        .route("/", get(handle_dashboard))
+        .layer(CorsLayer::permissive())
+        .with_state(state);
 
-    // Metrics endpoint
-    let metrics = warp::path("api")
-        .and(warp::path("metrics"))
-        .and(warp::get())
-        .and(with_monitor(monitor_clone.clone()))
-        .and_then(handle_metrics);
+    let addr = SocketAddr::from(([0, 0, 0, 0], port));
 
-    // Events endpoint
-    let events = warp::path("api")
-        .and(warp::path("events"))
-        .and(warp::get())
-        .and(with_monitor(monitor_clone.clone()))
-        .and_then(handle_events);
-
-    // Alerts endpoint
-    let alerts = warp::path("api")
-        .and(warp::path("alerts"))
-        .and(warp::get())
-        .and(with_monitor(monitor_clone.clone()))
-        .and_then(handle_alerts);
-
-    // Shutdown endpoint
-    let shutdown = warp::path("api")
-        .and(warp::path("shutdown"))
-        .and(warp::post())
-        .map(move || {
-            info!("Shutdown request received");
-            // Send shutdown signal after response
-            tokio::spawn(async {
-                tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-                std::process::exit(0);
-            });
-            warp::reply::json(&serde_json::json!({"status": "shutdown initiated"}))
-        });
-
-    // Static files for dashboard UI
-    let dashboard = warp::path::end()
-        .and(warp::get())
-        .map(|| warp::reply::html(DASHBOARD_HTML));
-
-    // Combine all routes
-    let routes = status
-        .or(metrics)
-        .or(events)
-        .or(alerts)
-        .or(shutdown)
-        .or(dashboard)
-        .with(warp::cors().allow_any_origin());
-
-    // Start server
     tokio::spawn(async move {
-        warp::serve(routes).run(([0, 0, 0, 0], port)).await;
+        let listener = tokio::net::TcpListener::bind(addr)
+            .await
+            .expect("Failed to bind address");
+
+        axum::serve(listener, app)
+            .await
+            .expect("Failed to start server");
     });
 
     Ok(())
 }
 
-fn with_agents(
-    agents: Arc<RwLock<HashMap<String, AgentProcess>>>,
-) -> impl Filter<
-    Extract = (Arc<RwLock<HashMap<String, AgentProcess>>>,),
-    Error = std::convert::Infallible,
-> + Clone {
-    warp::any().map(move || agents.clone())
-}
-
-fn with_monitor(
-    monitor: Arc<Monitor>,
-) -> impl Filter<Extract = (Arc<Monitor>,), Error = std::convert::Infallible> + Clone {
-    warp::any().map(move || monitor.clone())
-}
-
-async fn handle_status(
-    agents: Arc<RwLock<HashMap<String, AgentProcess>>>,
-) -> Result<impl Reply, Rejection> {
-    let agents_guard = agents.read().await;
+async fn handle_status(State(state): State<AppState>) -> impl IntoResponse {
+    let agents_guard = state.agents.read().await;
 
     let agent_list: Vec<AgentInfo> = agents_guard
         .values()
@@ -154,39 +110,70 @@ async fn handle_status(
         agents: agent_list,
     };
 
-    Ok(warp::reply::json(&response))
+    Json(response)
 }
 
-async fn handle_metrics(monitor: Arc<Monitor>) -> Result<impl Reply, Rejection> {
-    let metrics_data = monitor.export_metrics("json").await.map_err(|e| {
+async fn handle_metrics(State(state): State<AppState>) -> Result<impl IntoResponse, AppError> {
+    let metrics_data = state.monitor.export_metrics("json").await.map_err(|e| {
         error!("Failed to export metrics: {e}");
-        warp::reject::reject()
+        AppError::InternalError
     })?;
 
     let response = MetricsResponse {
         metrics: serde_json::from_str(&metrics_data).unwrap_or(serde_json::json!({})),
     };
 
-    Ok(warp::reply::json(&response))
+    Ok(Json(response))
 }
 
-async fn handle_events(monitor: Arc<Monitor>) -> Result<impl Reply, Rejection> {
-    let events = monitor.get_recent_events(100).await;
-
+async fn handle_events(State(state): State<AppState>) -> impl IntoResponse {
+    let events = state.monitor.get_recent_events(100).await;
     let response = EventsResponse { events };
-
-    Ok(warp::reply::json(&response))
+    Json(response)
 }
 
-async fn handle_alerts(monitor: Arc<Monitor>) -> Result<impl Reply, Rejection> {
-    let alerts = monitor.get_recent_alerts(50).await;
-
+async fn handle_alerts(State(state): State<AppState>) -> impl IntoResponse {
+    let alerts = state.monitor.get_recent_alerts(50).await;
     let response = AlertsResponse { alerts };
-
-    Ok(warp::reply::json(&response))
+    Json(response)
 }
 
-// Basic dashboard HTML
+async fn handle_shutdown() -> impl IntoResponse {
+    info!("Shutdown request received");
+
+    // Send shutdown signal after response
+    tokio::spawn(async {
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        std::process::exit(0);
+    });
+
+    Json(serde_json::json!({"status": "shutdown initiated"}))
+}
+
+async fn handle_dashboard() -> impl IntoResponse {
+    Html(DASHBOARD_HTML)
+}
+
+// Custom error type for better error handling
+enum AppError {
+    InternalError,
+}
+
+impl IntoResponse for AppError {
+    fn into_response(self) -> axum::response::Response {
+        let (status, error_message) = match self {
+            AppError::InternalError => (StatusCode::INTERNAL_SERVER_ERROR, "Internal server error"),
+        };
+
+        let body = Json(serde_json::json!({
+            "error": error_message,
+        }));
+
+        (status, body).into_response()
+    }
+}
+
+// Basic dashboard HTML (same as before)
 const DASHBOARD_HTML: &str = r#"
 <!DOCTYPE html>
 <html lang="en">

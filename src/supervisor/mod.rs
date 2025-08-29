@@ -342,7 +342,7 @@ impl Supervisor {
     async fn start_dashboard(&self, port: u16) -> Result<()> {
         info!("Starting web dashboard on port {port}");
 
-        // Dashboard implementation will be in api.rs
+        // Dashboard implementation using Axum
         api::start_dashboard_server(port, self.agents.clone(), self.monitor.clone()).await?;
 
         Ok(())

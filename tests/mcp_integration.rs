@@ -19,6 +19,21 @@ use tokio::time::timeout;
 fn target_binary_path(bin_name: &str) -> String {
     let mut path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     path.push("target");
+
+    // Check for the actual target directory based on the build configuration
+    // When using musl target (as configured in .cargo/config.toml), binaries are in a different location
+    let musl_target = "x86_64-unknown-linux-musl";
+    let mut musl_path = path.clone();
+    musl_path.push(musl_target);
+    musl_path.push("debug");
+    musl_path.push(bin_name);
+
+    // Try musl target path first (our default), then fall back to regular debug path
+    if musl_path.exists() {
+        return musl_path.to_string_lossy().to_string();
+    }
+
+    // Fall back to regular debug directory
     path.push("debug");
     path.push(bin_name);
 
@@ -27,8 +42,10 @@ fn target_binary_path(bin_name: &str) -> String {
     // Check if binary exists and provide helpful error if not
     if !path.exists() {
         eprintln!(
-            "Warning: Binary {} not found at {}. Make sure to run 'cargo build --bins' first.",
-            bin_name, path_str
+            "Warning: Binary {} not found at {} or {}. Make sure to run 'cargo build --bins' first.",
+            bin_name,
+            musl_path.to_string_lossy(),
+            path_str
         );
     }
 
