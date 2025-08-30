@@ -90,6 +90,47 @@ impl Replicante {
     async fn think(&self, observation: Observation) -> Result<Thought> {
         info!("Thinking about current situation...");
 
+        // Generate tool format list from available tools
+        let tool_formats = observation
+            .available_tools
+            .iter()
+            .map(|tool| format!("- \"use_tool:{}\" - use the {} tool", tool, tool))
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        // Build action formats including discovered tools and built-in actions
+        let action_formats = format!(
+            r#"{}
+- "explore" - discover available tools (use sparingly)
+- "remember:key:value" - persist knowledge
+- "wait" - wait for a period of time"#,
+            tool_formats
+        );
+
+        // Generate action guidelines based on available tools
+        let mut action_guidelines = Vec::new();
+        for tool in &observation.available_tools {
+            match tool.as_str() {
+                "http:http_get" => action_guidelines.push("- If you need to research something, use http:http_get to search for information"),
+                "shell:docker_pull" | "http:download_file" => {
+                    if tool == "shell:docker_pull" {
+                        action_guidelines.push("- If you need software, use shell:docker_pull to obtain Docker images");
+                    } else {
+                        action_guidelines.push("- If you need software, use http:download_file to obtain it");
+                    }
+                },
+                "filesystem:write_file" => action_guidelines.push("- Create files with filesystem:write_file to save your progress and configurations"),
+                "shell:run_command" => action_guidelines.push("- Use shell:run_command to execute commands and scripts"),
+                "shell:docker_run" => action_guidelines.push("- Use shell:docker_run to start containers"),
+                _ => {}
+            }
+        }
+        let guidelines = if action_guidelines.is_empty() {
+            "- Use the available tools to make progress toward your goals".to_string()
+        } else {
+            action_guidelines.join("\n")
+        };
+
         let prompt = format!(
             r#"You are an autonomous AI agent with the ID: {id}
             
@@ -111,41 +152,28 @@ Priority 2: Gather specific information needed for the next action
 Priority 3: Only explore when you have no other options
 
 Action Guidelines:
-- If you need to research something, use http:http_get to search for information
-- If you need software, use shell:docker_pull or http:download_file to obtain it
-- Create files with filesystem:write_file to save your progress and configurations
-- Use shell:run_command to execute commands and scripts
-- Use shell:docker_run to start containers
+{guidelines}
 
 Respond with your reasoning, confidence level (0-1), and proposed actions.
 Format your response as JSON with keys: reasoning, confidence, proposed_actions
 
-Available tool formats:
-- "use_tool:filesystem:read_file" - read a file
-- "use_tool:filesystem:write_file" - write/create a file
-- "use_tool:filesystem:list_directory" - list directory contents
-- "use_tool:filesystem:create_directory" - create a directory
-- "use_tool:shell:run_command" - execute shell commands
-- "use_tool:shell:docker_pull" - pull Docker images
-- "use_tool:shell:docker_run" - run Docker containers
-- "use_tool:shell:docker_ps" - list Docker containers
-- "use_tool:http:http_get" - make HTTP GET requests
-- "use_tool:http:download_file" - download files from URLs
-- "explore" - discover available tools (use sparingly)
-- "remember:key:value" - persist knowledge
+Available action formats:
+{action_formats}
 
 Example response:
 {{
-  "reasoning": "I need to research Fedimint to understand how to set it up. I'll search for documentation and then download the necessary Docker images.",
+  "reasoning": "I need to accomplish my next objective. Based on the available tools, I'll take specific actions.",
   "confidence": 0.9,
-  "proposed_actions": ["use_tool:http:http_get", "use_tool:shell:docker_pull", "use_tool:filesystem:write_file"]
+  "proposed_actions": ["use_tool:http:http_get", "use_tool:filesystem:write_file"]
 }}"#,
             id = self.id,
             goals = self.goals,
             timestamp = observation.timestamp,
             tools = observation.available_tools,
             memory = serde_json::to_string_pretty(&observation.memory)?,
-            events = observation.recent_events
+            events = observation.recent_events,
+            guidelines = guidelines,
+            action_formats = action_formats
         );
 
         let response = self.llm.complete(&prompt).await?;
