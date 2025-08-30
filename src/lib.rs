@@ -103,29 +103,42 @@ Current observation:
 - Memory: {memory}
 - Recent events: {events:?}
 
-Based on this observation and your goals, reason about what you should do next.
-Consider:
-1. How can you work towards your goals?
-2. What tools could help you achieve your objectives?
-3. What knowledge should you acquire or remember?
-4. What actions would best serve your purpose?
+IMPORTANT: You must make concrete progress toward your goals. Exploration alone is not progress.
+Take immediate action by:
+
+Priority 1: Take concrete actions that create or change something
+Priority 2: Gather specific information needed for the next action  
+Priority 3: Only explore when you have no other options
+
+Action Guidelines:
+- If you need to research something, use http:http_get to search for information
+- If you need software, use shell:docker_pull or http:download_file to obtain it
+- Create files with filesystem:write_file to save your progress and configurations
+- Use shell:run_command to execute commands and scripts
+- Use shell:docker_run to start containers
 
 Respond with your reasoning, confidence level (0-1), and proposed actions.
 Format your response as JSON with keys: reasoning, confidence, proposed_actions
 
-For proposed_actions, use these formats:
-- "use_tool:filesystem:read_file" - to read a file
-- "use_tool:filesystem:write_file" - to write a file
-- "use_tool:filesystem:list_directory" - to list directory contents
-- "explore" - to explore capabilities
-- "remember:key:value" - to remember something
-- "wait" - to wait
+Available tool formats:
+- "use_tool:filesystem:read_file" - read a file
+- "use_tool:filesystem:write_file" - write/create a file
+- "use_tool:filesystem:list_directory" - list directory contents
+- "use_tool:filesystem:create_directory" - create a directory
+- "use_tool:shell:run_command" - execute shell commands
+- "use_tool:shell:docker_pull" - pull Docker images
+- "use_tool:shell:docker_run" - run Docker containers
+- "use_tool:shell:docker_ps" - list Docker containers
+- "use_tool:http:http_get" - make HTTP GET requests
+- "use_tool:http:download_file" - download files from URLs
+- "explore" - discover available tools (use sparingly)
+- "remember:key:value" - persist knowledge
 
 Example response:
 {{
-  "reasoning": "I should explore my filesystem tools to understand what I can do",
-  "confidence": 0.8,
-  "proposed_actions": ["explore"]
+  "reasoning": "I need to research Fedimint to understand how to set it up. I'll search for documentation and then download the necessary Docker images.",
+  "confidence": 0.9,
+  "proposed_actions": ["use_tool:http:http_get", "use_tool:shell:docker_pull", "use_tool:filesystem:write_file"]
 }}"#,
             id = self.id,
             goals = self.goals,
@@ -246,17 +259,17 @@ Example response:
         let first_action = &thought.proposed_actions[0];
 
         if let Some(tool_part) = first_action.strip_prefix("use_tool:") {
-            // For filesystem tools, create appropriate parameters
-            let params = if tool_part.contains("list_directory") {
-                serde_json::json!({"path": "/sandbox"})
-            } else if tool_part.contains("read_file") {
-                serde_json::json!({"path": "/sandbox/test.txt"})
-            } else if tool_part.contains("write_file") {
-                serde_json::json!({
-                    "path": "/sandbox/agent_log.txt",
-                    "content": format!("Agent {id} was here at {time}", id = self.id, time = Utc::now())
-                })
+            // tool_part is like "filesystem:read_file" - the full MCP tool name
+
+            // Provide sensible default parameters based on the tool
+            let params = if tool_part == "filesystem:list_directory" {
+                // Default to current directory (workspace root)
+                serde_json::json!({"path": "."})
+            } else if tool_part == "filesystem:file_exists" {
+                // Default to checking current directory
+                serde_json::json!({"path": "."})
             } else {
+                // For other tools, use empty params and let the tool handle defaults
                 serde_json::json!({})
             };
 
