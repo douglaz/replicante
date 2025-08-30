@@ -115,12 +115,20 @@ impl OpenAIProvider {
             .api_key
             .clone()
             .or_else(|| std::env::var("OPENAI_API_KEY").ok())
-            .ok_or_else(|| anyhow::anyhow!("OpenAI API key not found"))?;
+            .or_else(|| std::env::var("GEMINI_API_KEY").ok())
+            .ok_or_else(|| anyhow::anyhow!("OpenAI/Gemini API key not found"))?;
 
-        let api_url = config
+        let mut api_url = config
             .api_url
             .clone()
             .unwrap_or_else(|| "https://api.openai.com/v1/chat/completions".to_string());
+
+        // Fix Gemini endpoint if needed
+        if api_url.contains("generativelanguage.googleapis.com")
+            && !api_url.contains("/chat/completions")
+        {
+            api_url = format!("{}/chat/completions", api_url.trim_end_matches('/'));
+        }
 
         Ok(Self {
             client: Client::builder()
