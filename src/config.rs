@@ -70,6 +70,7 @@ impl Default for Config {
                 temperature: Some(0.7),
                 max_tokens: Some(4000),
                 api_url: None,
+                timeout_secs: None, // Will use provider defaults
             },
             mcp_servers: vec![
                 MCPServerConfig {

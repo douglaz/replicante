@@ -530,6 +530,27 @@ impl MCPClient {
         Ok(all_tools)
     }
 
+    pub async fn get_tools_with_schemas(&self) -> Result<Vec<Tool>> {
+        let mut all_tools = Vec::new();
+
+        for server in &self.servers {
+            let server_guard = server.lock().await;
+            for tool_info in &server_guard.tools {
+                all_tools.push(Tool {
+                    name: format!(
+                        "{server}:{tool}",
+                        server = server_guard.name,
+                        tool = tool_info.name
+                    ),
+                    description: tool_info.description.clone(),
+                    parameters: tool_info.input_schema.clone(),
+                });
+            }
+        }
+
+        Ok(all_tools)
+    }
+
     fn start_health_monitoring(&self) {
         let servers = self.servers.clone();
 

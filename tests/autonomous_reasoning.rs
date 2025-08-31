@@ -21,6 +21,7 @@ fn create_test_config(db_path: &str) -> replicante::Config {
             temperature: None,
             max_tokens: None,
             api_url: None,
+            timeout_secs: None,
         },
         mcp_servers: vec![],
     }

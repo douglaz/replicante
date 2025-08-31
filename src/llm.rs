@@ -13,6 +13,7 @@ pub struct LLMConfig {
     pub temperature: Option<f64>,
     pub max_tokens: Option<u32>,
     pub api_url: Option<String>,
+    pub timeout_secs: Option<u64>,
 }
 
 #[async_trait]
@@ -196,9 +197,24 @@ impl OllamaProvider {
             .or_else(|| std::env::var("OLLAMA_HOST").ok())
             .unwrap_or_else(|| "http://localhost:11434".to_string());
 
+        // Use configured timeout, or smart defaults based on model size
+        let timeout_secs = config.timeout_secs.unwrap_or_else(|| {
+            if config.model.contains("70b") || config.model.contains("405b") {
+                1800 // 30 minutes for large models
+            } else {
+                300 // 5 minutes for regular models
+            }
+        });
+
+        tracing::info!(
+            "Ollama provider initialized for model '{}' with {} second timeout",
+            config.model,
+            timeout_secs
+        );
+
         Ok(Self {
             client: Client::builder()
-                .timeout(Duration::from_secs(300))
+                .timeout(Duration::from_secs(timeout_secs))
                 .build()?,
             model: config.model.clone(),
             api_url,
@@ -317,6 +333,7 @@ mod tests {
             temperature: Some(0.7),
             max_tokens: Some(4000),
             api_url: None,
+            timeout_secs: None,
         };
 
         let _provider = create_provider(&config)?;
@@ -333,6 +350,7 @@ mod tests {
             temperature: None,
             max_tokens: None,
             api_url: None,
+            timeout_secs: None,
         };
 
         let _provider = create_provider(&config)?;
