@@ -134,7 +134,7 @@ impl Monitor {
     }
 
     pub async fn check_agent_health(&self, agent: &AgentProcess) -> Result<()> {
-        debug!("Checking health for agent {}", agent.id);
+        debug!("Checking health for agent {id}", id = agent.id);
 
         // Check resource usage
         if agent.resource_usage.cpu_percent > 80.0 {
@@ -260,7 +260,7 @@ impl Monitor {
         info!("Generating incident report for agent {agent_id}");
 
         let timestamp = Utc::now().format("%Y%m%d_%H%M%S");
-        let filename = format!("incident_{}_{}.json", agent_id, timestamp);
+        let filename = format!("incident_{agent_id}_{timestamp}.json");
 
         // Collect all relevant data
         let events = self.events.read().await;

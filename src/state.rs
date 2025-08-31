@@ -187,7 +187,7 @@ impl StateManager {
                     "DELETE FROM memory 
                      WHERE (key LIKE 'tool_result_%' OR key LIKE 'error_%')
                        AND datetime(updated_at) < datetime('now', ?1)",
-                    params![format!("-{} days", keep_days)],
+                    params![format!("-{keep_days} days")],
                 )?;
 
                 // Also delete discovered_tools as it's redundant
@@ -989,9 +989,9 @@ mod tests {
                 Utc::now().timestamp_nanos_opt().unwrap_or(i)
             );
             let value = serde_json::json!({
-                "tool": format!("test_tool_{}", i),
+                "tool": format!("test_tool_{i}"),
                 "success": true,
-                "content": format!("This is result {} with some content", i),
+                "content": format!("This is result {i} with some content"),
                 "timestamp": Utc::now().to_rfc3339(),
             });
             state.remember(&key, value).await?;
@@ -1045,12 +1045,12 @@ mod tests {
         // Create tool results with timestamps in keys for ordering
         let base_time = 1700000000;
         for i in 0..10 {
-            let key = format!("tool_result_{}", base_time + i);
+            let key = format!("tool_result_{timestamp}", timestamp = base_time + i);
             let value = serde_json::json!({
-                "tool": format!("tool_{}", i),
+                "tool": format!("tool_{i}"),
                 "success": true,
-                "content": format!("Result {}", i),
-                "timestamp": format!("2024-01-0{}T12:00:00Z", i),
+                "content": format!("Result {i}"),
+                "timestamp": format!("2024-01-0{i}T12:00:00Z"),
             });
             state.remember(&key, value).await?;
         }

@@ -27,7 +27,10 @@ pub fn create_provider(config: &LLMConfig) -> Result<Box<dyn LLMProvider>> {
         "openai" => Ok(Box::new(OpenAIProvider::new(config)?)),
         "ollama" => Ok(Box::new(OllamaProvider::new(config)?)),
         "mock" => Ok(Box::new(MockLLMProvider::new())),
-        _ => bail!("Unknown LLM provider: {}", config.provider),
+        _ => bail!(
+            "Unknown LLM provider: {provider}",
+            provider = config.provider
+        ),
     }
 }
 
@@ -128,7 +131,10 @@ impl OpenAIProvider {
         if api_url.contains("generativelanguage.googleapis.com")
             && !api_url.contains("/chat/completions")
         {
-            api_url = format!("{}/chat/completions", api_url.trim_end_matches('/'));
+            api_url = format!(
+                "{base}/chat/completions",
+                base = api_url.trim_end_matches('/')
+            );
         }
 
         Ok(Self {
@@ -162,7 +168,10 @@ impl LLMProvider for OpenAIProvider {
         let response = self
             .client
             .post(&self.api_url)
-            .header("Authorization", format!("Bearer {}", self.api_key))
+            .header(
+                "Authorization",
+                format!("Bearer {api_key}", api_key = self.api_key),
+            )
             .json(&request_body)
             .send()
             .await?;
@@ -235,7 +244,7 @@ impl LLMProvider for OllamaProvider {
 
         let response = self
             .client
-            .post(format!("{}/api/generate", self.api_url))
+            .post(format!("{api_url}/api/generate", api_url = self.api_url))
             .json(&request_body)
             .send()
             .await?;

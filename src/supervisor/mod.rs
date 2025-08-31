@@ -185,7 +185,7 @@ impl Supervisor {
         config_path: String,
         sandbox_config: Option<SandboxConfig>,
     ) -> Result<String> {
-        let agent_id = format!("agent-{}", Uuid::new_v4());
+        let agent_id = format!("agent-{uuid}", uuid = Uuid::new_v4());
 
         info!("Spawning agent {agent_id} with config: {config_path}");
 

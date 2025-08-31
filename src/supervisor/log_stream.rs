@@ -16,7 +16,10 @@ impl LogStreamer {
     }
 
     pub async fn stream_logs(&self, tx: mpsc::Sender<String>) -> Result<()> {
-        info!("Starting log stream for container {}", self.container_id);
+        info!(
+            "Starting log stream for container {container_id}",
+            container_id = self.container_id
+        );
 
         // Verify container exists first
         if !self.container_exists().await? {
@@ -90,7 +93,10 @@ impl LogStreamer {
             error!("Docker logs command failed with status: {status}");
         }
 
-        info!("Log stream ended for container {}", self.container_id);
+        info!(
+            "Log stream ended for container {container_id}",
+            container_id = self.container_id
+        );
         Ok(())
     }
 

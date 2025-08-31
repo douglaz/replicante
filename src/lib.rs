@@ -131,7 +131,7 @@ impl Replicante {
 
         // Get tools with their full schemas
         let tools = self.mcp.get_tools_with_schemas().await?;
-        info!("Found {} total tools", tools.len());
+        info!("Found {count} total tools", count = tools.len());
 
         let mut examples = Vec::new();
 
@@ -184,12 +184,10 @@ impl Replicante {
                         if required_fields.contains(&key.as_str()) || required_fields.is_empty() {
                             let example_value = Self::generate_example_value(key, prop_schema);
                             info!(
-                                "  Parameter '{}': type={:?}, example={}",
-                                key,
-                                prop_schema.get("type"),
-                                example_value
+                                "  Parameter '{key}': type={type:?}, example={example_value}",
+                                type = prop_schema.get("type")
                             );
-                            param_examples.push(format!(r#""{}": {}"#, key, example_value));
+                            param_examples.push(format!(r#""{key}": {example_value}"#));
 
                             // Only show first 2-3 params for brevity
                             if param_examples.len() >= 2 {
@@ -227,16 +225,25 @@ impl Replicante {
                             param_examples.join(", ")
                         );
 
-                        info!("Generated example for '{}': {}", tool.name, example);
+                        info!(
+                            "Generated example for '{name}': {example}",
+                            name = tool.name
+                        );
                         examples.push(example);
                     } else {
-                        warn!("No parameters generated for tool '{}'", tool.name);
+                        warn!(
+                            "No parameters generated for tool '{name}'",
+                            name = tool.name
+                        );
                     }
                 } else {
-                    warn!("Tool '{}' has no properties in schema", tool.name);
+                    warn!(
+                        "Tool '{name}' has no properties in schema",
+                        name = tool.name
+                    );
                 }
             } else {
-                info!("Tool '{}' has no parameter schema", tool.name);
+                info!("Tool '{name}' has no parameter schema", name = tool.name);
             }
         }
 
@@ -252,11 +259,14 @@ impl Replicante {
                 .to_string(),
             );
         } else {
-            info!("Successfully generated {} tool examples", examples.len());
+            info!(
+                "Successfully generated {count} tool examples",
+                count = examples.len()
+            );
         }
 
         let result = examples.join("\n\n");
-        info!("Final tool examples:\n{}", result);
+        info!("Final tool examples:\n{result}");
         Ok(result)
     }
 
@@ -268,7 +278,7 @@ impl Replicante {
             .available_tools
             .iter()
             .take(10) // Limit to first 10 tools to save context
-            .map(|tool| format!("- \"use_tool:{}\"", tool))
+            .map(|tool| format!("- \"use_tool:{tool}\""))
             .collect::<Vec<_>>()
             .join("\n");
 
@@ -317,7 +327,7 @@ impl Replicante {
 
         // Generate dynamic examples based on actual tool schemas
         let tool_examples = self.generate_tool_examples().await.unwrap_or_else(|e| {
-            error!("Failed to generate tool examples: {}", e);
+            error!("Failed to generate tool examples: {e}");
             // Fallback to basic examples if generation fails
             r#"{
   "reasoning": "I need to take action.",
@@ -382,29 +392,29 @@ Additional examples:
 
         // Log the complete prompt for debugging
         info!("=== SENDING PROMPT TO LLM ===");
-        info!("Prompt length: {} characters", prompt.len());
+        info!("Prompt length: {length} characters", length = prompt.len());
 
         // Warn if context is too large
         if prompt.len() > 100_000 {
             warn!(
-                "Prompt exceeds 100KB ({} chars) - may degrade LLM performance",
-                prompt.len()
+                "Prompt exceeds 100KB ({length} chars) - may degrade LLM performance",
+                length = prompt.len()
             );
         }
         if prompt.len() > 50_000 {
             info!(
-                "Large prompt detected ({} chars) - consider further optimization",
-                prompt.len()
+                "Large prompt detected ({length} chars) - consider further optimization",
+                length = prompt.len()
             );
         }
 
         // Only log full prompt if it's reasonable size (for debugging)
         if prompt.len() < 50_000 {
-            info!("Full prompt:\n{}", prompt);
+            info!("Full prompt:\n{prompt}");
         } else {
             info!(
-                "Prompt too large to log fully. First 1000 chars:\n{}",
-                &prompt[..1000.min(prompt.len())]
+                "Prompt too large to log fully. First 1000 chars:\n{snippet}",
+                snippet = &prompt[..1000.min(prompt.len())]
             );
         }
         info!("=== END OF PROMPT ===");
@@ -413,8 +423,11 @@ Additional examples:
 
         // Log the raw LLM response for debugging
         info!("=== LLM RESPONSE ===");
-        info!("Response length: {} characters", response.len());
-        info!("Full response: {}", response);
+        info!(
+            "Response length: {length} characters",
+            length = response.len()
+        );
+        info!("Full response: {response}");
         info!("=== END OF RESPONSE ===");
 
         // Parse LLM response - handle both JSON and plain text
@@ -479,7 +492,7 @@ Additional examples:
                 let decision_id = self
                     .state
                     .record_decision(
-                        &format!("{} [learned]", thought.reasoning),
+                        &format!("{reasoning} [learned]", reasoning = thought.reasoning),
                         &format!(
                             "action: {}, params: {:?}",
                             thought.action, thought.parameters
@@ -600,7 +613,7 @@ Additional examples:
                             serde_json::json!({
                                 "success": true,
                                 "tool": name,
-                                "summary": format!("Large result truncated (original: {} bytes)", result_str.len()),
+                                "summary": format!("Large result truncated (original: {size} bytes)", size = result_str.len()),
                                 "truncated_content": truncated_content,
                                 "timestamp": Utc::now()
                             })
@@ -622,7 +635,7 @@ Additional examples:
                         let duration_ms = start_time.elapsed().as_millis() as u64;
                         let result = DecisionResult {
                             status: "success".to_string(),
-                            summary: Some(format!("Tool {} executed successfully", name)),
+                            summary: Some(format!("Tool {name} executed successfully")),
                             error: None,
                             duration_ms: Some(duration_ms),
                         };
@@ -636,7 +649,10 @@ Additional examples:
                         // Store failure in memory so agent can observe it
                         self.state
                             .remember(
-                                &format!("tool_result_{}", Utc::now().timestamp()),
+                                &format!(
+                                    "tool_result_{timestamp}",
+                                    timestamp = Utc::now().timestamp()
+                                ),
                                 serde_json::json!({
                                     "success": false,
                                     "tool": name,
@@ -682,7 +698,7 @@ Additional examples:
                 let duration_ms = start_time.elapsed().as_millis() as u64;
                 let result = DecisionResult {
                     status: "success".to_string(),
-                    summary: Some(format!("Remembered key: {}", key)),
+                    summary: Some(format!("Remembered key: {key}")),
                     error: None,
                     duration_ms: Some(duration_ms),
                 };

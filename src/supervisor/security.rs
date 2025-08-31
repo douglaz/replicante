@@ -97,7 +97,7 @@ impl SecurityScanner {
             interval.tick().await;
 
             if let Err(e) = self.scan_containers().await {
-                error!("Security scan failed: {}", e);
+                error!("Security scan failed: {e}");
             }
         }
     }
@@ -343,7 +343,7 @@ impl SecurityScanner {
 
             if caps.contains("SYS_ADMIN") || caps.contains("SYS_PTRACE") {
                 findings.push(SecurityFinding::PrivilegeEscalation {
-                    details: format!("Dangerous capabilities: {}", caps),
+                    details: format!("Dangerous capabilities: {caps}"),
                 });
             }
         }
@@ -408,7 +408,7 @@ impl SecurityScanner {
         let json = serde_json::to_string_pretty(&report)?;
 
         // For now, just log it
-        debug!("Security report: {}", json);
+        debug!("Security report: {json}");
 
         Ok(())
     }
