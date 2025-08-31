@@ -89,6 +89,7 @@ fn verify_llm_system_exists() {
         temperature: None,
         max_tokens: None,
         api_url: None,
+        timeout_secs: None,
     };
 
     // This will panic at runtime if mock provider doesn't exist,
@@ -179,6 +180,7 @@ fn verify_mock_llm_provider_exists() {
         temperature: None,
         max_tokens: None,
         api_url: None,
+        timeout_secs: None,
     };
 
     match create_provider(&config) {

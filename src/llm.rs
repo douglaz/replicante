@@ -13,6 +13,7 @@ pub struct LLMConfig {
     pub temperature: Option<f64>,
     pub max_tokens: Option<u32>,
     pub api_url: Option<String>,
+    pub timeout_secs: Option<u64>,
 }
 
 #[async_trait]
@@ -26,7 +27,10 @@ pub fn create_provider(config: &LLMConfig) -> Result<Box<dyn LLMProvider>> {
         "openai" => Ok(Box::new(OpenAIProvider::new(config)?)),
         "ollama" => Ok(Box::new(OllamaProvider::new(config)?)),
         "mock" => Ok(Box::new(MockLLMProvider::new())),
-        _ => bail!("Unknown LLM provider: {}", config.provider),
+        _ => bail!(
+            "Unknown LLM provider: {provider}",
+            provider = config.provider
+        ),
     }
 }
 
@@ -127,7 +131,10 @@ impl OpenAIProvider {
         if api_url.contains("generativelanguage.googleapis.com")
             && !api_url.contains("/chat/completions")
         {
-            api_url = format!("{}/chat/completions", api_url.trim_end_matches('/'));
+            api_url = format!(
+                "{base}/chat/completions",
+                base = api_url.trim_end_matches('/')
+            );
         }
 
         Ok(Self {
@@ -161,7 +168,10 @@ impl LLMProvider for OpenAIProvider {
         let response = self
             .client
             .post(&self.api_url)
-            .header("Authorization", format!("Bearer {}", self.api_key))
+            .header(
+                "Authorization",
+                format!("Bearer {api_key}", api_key = self.api_key),
+            )
             .json(&request_body)
             .send()
             .await?;
@@ -196,9 +206,18 @@ impl OllamaProvider {
             .or_else(|| std::env::var("OLLAMA_HOST").ok())
             .unwrap_or_else(|| "http://localhost:11434".to_string());
 
+        // Use configured timeout, or smart defaults based on model size
+        let timeout_secs = config.timeout_secs.unwrap_or(1800); // 30 minutes default
+
+        tracing::info!(
+            "Ollama provider initialized for model '{model}' with {timeout} second timeout",
+            model = config.model,
+            timeout = timeout_secs
+        );
+
         Ok(Self {
             client: Client::builder()
-                .timeout(Duration::from_secs(300))
+                .timeout(Duration::from_secs(timeout_secs))
                 .build()?,
             model: config.model.clone(),
             api_url,
@@ -219,7 +238,7 @@ impl LLMProvider for OllamaProvider {
 
         let response = self
             .client
-            .post(format!("{}/api/generate", self.api_url))
+            .post(format!("{api_url}/api/generate", api_url = self.api_url))
             .json(&request_body)
             .send()
             .await?;
@@ -317,6 +336,7 @@ mod tests {
             temperature: Some(0.7),
             max_tokens: Some(4000),
             api_url: None,
+            timeout_secs: None,
         };
 
         let _provider = create_provider(&config)?;
@@ -333,6 +353,7 @@ mod tests {
             temperature: None,
             max_tokens: None,
             api_url: None,
+            timeout_secs: None,
         };
 
         let _provider = create_provider(&config)?;

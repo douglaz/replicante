@@ -157,7 +157,10 @@ impl MCPClient {
             .stderr(Stdio::piped())
             .kill_on_drop(true);
 
-        debug!("Spawning MCP server process: {}", config.command);
+        debug!(
+            "Spawning MCP server process: {command}",
+            command = config.command
+        );
         let mut child = cmd.spawn().with_context(|| {
             format!(
                 "Failed to spawn MCP server: {command}",
@@ -257,11 +260,11 @@ impl MCPClient {
                 );
             }
             Ok(Err(e)) => {
-                error!("MCP server initialization failed: {}: {}", server_name, e);
+                error!("MCP server initialization failed: {server_name}: {e}");
                 return Err(e);
             }
             Err(_) => {
-                error!("MCP server initialization timed out: {}", server_name);
+                error!("MCP server initialization timed out: {server_name}");
                 bail!("MCP server initialization timed out");
             }
         }
@@ -278,7 +281,7 @@ impl MCPClient {
         drop(server_guard);
 
         // Send initialize request
-        debug!("Sending initialize request to MCP server: {}", server_name);
+        debug!("Sending initialize request to MCP server: {server_name}");
         let init_params = InitializeParams::new(
             "replicante".to_string(),
             env!("CARGO_PKG_VERSION").to_string(),
@@ -290,7 +293,7 @@ impl MCPClient {
             server_name, request.method
         );
         let response = Self::send_request(server.clone(), stdin.clone(), request).await?;
-        debug!("Initialize response received from {}", server_name);
+        debug!("Initialize response received from {server_name}");
 
         // Parse initialize response
         if let Some(result) = response.result {
@@ -303,10 +306,10 @@ impl MCPClient {
             );
 
             // Send initialized notification
-            debug!("Sending initialized notification to {}", server_name);
+            debug!("Sending initialized notification to {server_name}");
             let notification = Request::notification("initialized", Some(serde_json::json!({})));
             Self::send_notification(stdin.clone(), notification).await?;
-            debug!("Initialized notification sent to {}", server_name);
+            debug!("Initialized notification sent to {server_name}");
 
             // Mark server as initialized and healthy
             let mut server_guard = server.lock().await;
@@ -316,7 +319,7 @@ impl MCPClient {
             drop(server_guard);
 
             // Discover available tools with timeout
-            debug!("Starting tool discovery for {}", server_name);
+            debug!("Starting tool discovery for {server_name}");
             match timeout(
                 Duration::from_secs(5),
                 Self::discover_server_tools(server.clone(), stdin.clone()),
@@ -324,14 +327,14 @@ impl MCPClient {
             .await
             {
                 Ok(Ok(())) => {
-                    debug!("Tool discovery completed for {}", server_name);
+                    debug!("Tool discovery completed for {server_name}");
                 }
                 Ok(Err(e)) => {
-                    error!("Tool discovery failed for {}: {}", server_name, e);
+                    error!("Tool discovery failed for {server_name}: {e}");
                     return Err(e);
                 }
                 Err(_) => {
-                    error!("Tool discovery timed out for {}", server_name);
+                    error!("Tool discovery timed out for {server_name}");
                     bail!("Tool discovery timed out");
                 }
             }
@@ -510,6 +513,27 @@ impl MCPClient {
     }
 
     pub async fn discover_tools(&mut self) -> Result<Vec<Tool>> {
+        let mut all_tools = Vec::new();
+
+        for server in &self.servers {
+            let server_guard = server.lock().await;
+            for tool_info in &server_guard.tools {
+                all_tools.push(Tool {
+                    name: format!(
+                        "{server}:{tool}",
+                        server = server_guard.name,
+                        tool = tool_info.name
+                    ),
+                    description: tool_info.description.clone(),
+                    parameters: tool_info.input_schema.clone(),
+                });
+            }
+        }
+
+        Ok(all_tools)
+    }
+
+    pub async fn get_tools_with_schemas(&self) -> Result<Vec<Tool>> {
         let mut all_tools = Vec::new();
 
         for server in &self.servers {

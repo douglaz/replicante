@@ -57,7 +57,10 @@ impl ContainerManager {
     }
 
     pub async fn ensure_network(&self) -> Result<()> {
-        info!("Ensuring Docker network '{}' exists", self.network_name);
+        info!(
+            "Ensuring Docker network '{network_name}' exists",
+            network_name = self.network_name
+        );
 
         // Check if network exists
         let check_output = Command::new("docker")
@@ -70,7 +73,10 @@ impl ContainerManager {
 
         if !check_output.status.success() {
             // Network doesn't exist, create it
-            info!("Creating Docker network '{}'", self.network_name);
+            info!(
+                "Creating Docker network '{network_name}'",
+                network_name = self.network_name
+            );
 
             let create_output = Command::new("docker")
                 .arg("network")
@@ -92,7 +98,10 @@ impl ContainerManager {
                 self.network_name
             );
         } else {
-            debug!("Docker network '{}' already exists", self.network_name);
+            debug!(
+                "Docker network '{network_name}' already exists",
+                network_name = self.network_name
+            );
         }
 
         Ok(())
