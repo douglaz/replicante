@@ -43,9 +43,6 @@ enum Action {
         name: String,
         params: serde_json::Value,
     },
-    Think {
-        about: String,
-    },
     Remember {
         key: String,
         value: serde_json::Value,
@@ -323,10 +320,11 @@ Example responses:
             });
         }
 
-        // Default to thinking more
-        Ok(Action::Think {
-            about: thought.reasoning,
-        })
+        // Invalid action format - return error so agent can see and correct
+        anyhow::bail!(
+            "Invalid action format: '{}'. Expected one of: use_tool:<tool>, remember:<key>, explore, wait",
+            thought.action
+        )
     }
 
     async fn act(&mut self, action: Action) -> Result<()> {
@@ -394,10 +392,6 @@ Example responses:
                         self.state.record_capability(&name, None, false).await?;
                     }
                 }
-            }
-            Action::Think { about } => {
-                info!("Deep thinking about: {about}");
-                // Could trigger more complex reasoning here
             }
             Action::Remember { key, value } => {
                 info!("Remembering: {key} = {value:?}");
@@ -806,6 +800,41 @@ mod tests {
             thought.parameters.unwrap()["image"],
             "fedimint/fedimint:latest"
         );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_execute_decision_invalid_action_returns_error() -> Result<()> {
+        let agent = create_test_agent();
+
+        // Test with missing use_tool: prefix
+        let thought = Thought {
+            reasoning: "Testing invalid action format".to_string(),
+            confidence: 0.9,
+            action: "shell:run_command".to_string(),
+            parameters: Some(json!({"command": "ls"})),
+        };
+
+        let result = agent.execute_decision(thought).await;
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.to_string().contains("Invalid action format"));
+        assert!(err.to_string().contains("shell:run_command"));
+
+        // Test with completely unknown action
+        let thought2 = Thought {
+            reasoning: "Testing unknown action".to_string(),
+            confidence: 0.9,
+            action: "unknown_action".to_string(),
+            parameters: None,
+        };
+
+        let result2 = agent.execute_decision(thought2).await;
+        assert!(result2.is_err());
+        let err2 = result2.unwrap_err();
+        assert!(err2.to_string().contains("Invalid action format"));
+        assert!(err2.to_string().contains("unknown_action"));
+
         Ok(())
     }
 }
