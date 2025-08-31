@@ -1,10 +1,13 @@
 use anyhow::{Context, Result};
+use chrono::{DateTime, Utc};
 use rusqlite::{OptionalExtension, params};
 use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio_rusqlite::Connection;
 use tracing::{debug, info};
+
+use crate::{DecisionRecord, DecisionResult};
 
 pub struct StateManager {
     conn: Arc<Connection>,
@@ -172,28 +175,206 @@ impl StateManager {
         Ok(memory)
     }
 
+    /// Get a summarized version of memory for LLM context
+    /// Limits to recent and relevant entries to avoid context explosion
+    /// Clean up old memory entries to prevent unbounded growth
+    pub async fn cleanup_old_memory(&self, keep_days: i64) -> Result<usize> {
+        let deleted = self
+            .conn
+            .call(move |conn| {
+                // Delete old tool results and errors
+                let mut result = conn.execute(
+                    "DELETE FROM memory 
+                     WHERE (key LIKE 'tool_result_%' OR key LIKE 'error_%')
+                       AND datetime(updated_at) < datetime('now', ?1)",
+                    params![format!("-{} days", keep_days)],
+                )?;
+
+                // Also delete discovered_tools as it's redundant
+                result += conn.execute("DELETE FROM memory WHERE key = 'discovered_tools'", [])?;
+
+                Ok(result)
+            })
+            .await
+            .context("Failed to cleanup old memory")?;
+
+        info!("Cleaned up {deleted} old memory entries");
+        Ok(deleted)
+    }
+
+    pub async fn get_memory_summary(&self, max_entries: usize, max_size: usize) -> Result<Value> {
+        let memory = self
+            .conn
+            .call(move |conn| {
+                let mut memory = serde_json::Map::new();
+                let mut total_size = 0;
+                let mut entries_count = 0;
+
+                // First, get the last 3 tool results (most recent)
+                let mut tool_stmt = conn.prepare(
+                    "SELECT key, value, LENGTH(value) as size 
+                     FROM memory 
+                     WHERE key LIKE 'tool_result_%'
+                     ORDER BY key DESC  -- Keys contain timestamp, so DESC gives most recent
+                     LIMIT 3",
+                )?;
+
+                let tool_results = tool_stmt.query_map([], |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, i64>(2)?,
+                    ))
+                })?;
+
+                // Add tool results to memory
+                for entry in tool_results {
+                    if entries_count >= max_entries || total_size >= max_size {
+                        break;
+                    }
+
+                    let (key, value_str, size) = entry?;
+
+                    if let Ok(mut value) = serde_json::from_str::<Value>(&value_str) {
+                        // Truncate large values in tool results
+                        if let Some(content) =
+                            value.get("truncated_content").or(value.get("content"))
+                        {
+                            if let Some(s) = content.as_str() {
+                                if s.len() > 1000 {
+                                    value["truncated_content"] =
+                                        Value::String(format!("{}... [truncated]", &s[..1000]));
+                                }
+                            }
+                        }
+                        memory.insert(key, value);
+                        total_size += size.min(1000) as usize; // Count truncated size
+                        entries_count += 1;
+                    }
+                }
+
+                // Then get other important memory entries
+                let mut stmt = conn.prepare(
+                    "SELECT key, value, LENGTH(value) as size 
+                     FROM memory 
+                     WHERE key NOT LIKE 'tool_result_%' 
+                       AND key NOT LIKE 'error_%'        -- Exclude detailed errors
+                       AND key != 'discovered_tools'     -- Exclude redundant tool list
+                     ORDER BY 
+                       CASE 
+                         WHEN key IN ('agent_id', 'initial_goals', 'current_task') THEN 0
+                         WHEN key LIKE 'fedimint_%' THEN 1  -- Prioritize task-specific
+                         ELSE 2 
+                       END,
+                       updated_at DESC 
+                     LIMIT ?1",
+                )?;
+
+                let memory_iter = stmt.query_map(params![max_entries - entries_count], |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, i64>(2)?,
+                    ))
+                })?;
+
+                // Add other memory entries
+                for entry in memory_iter {
+                    if entries_count >= max_entries || total_size >= max_size {
+                        break;
+                    }
+
+                    let (key, value_str, size) = entry?;
+
+                    // Stop if we exceed size limit
+                    if total_size + size as usize > max_size {
+                        break;
+                    }
+
+                    if let Ok(mut value) = serde_json::from_str::<Value>(&value_str) {
+                        // Truncate large string values
+                        if let Some(s) = value.as_str() {
+                            if s.len() > 1000 {
+                                value = Value::String(format!("{}... [truncated]", &s[..1000]));
+                            }
+                        }
+                        memory.insert(key, value);
+                        total_size += size as usize;
+                        entries_count += 1;
+                    }
+                }
+
+                // Add memory statistics
+                let mut stats_stmt = conn.prepare(
+                    "SELECT COUNT(*) as total, SUM(LENGTH(value)) as total_size FROM memory",
+                )?;
+
+                let stats = stats_stmt
+                    .query_row([], |row| Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?)))?;
+
+                memory.insert(
+                    "_memory_stats".to_string(),
+                    serde_json::json!({
+                        "total_entries": stats.0,
+                        "total_size": stats.1,
+                        "shown_entries": memory.len(),
+                        "shown_size": total_size
+                    }),
+                );
+
+                Ok(Value::Object(memory))
+            })
+            .await
+            .context("Failed to get memory summary")?;
+
+        Ok(memory)
+    }
+
     pub async fn record_decision(
         &self,
         thought: &str,
         action: &str,
         result: Option<&str>,
-    ) -> Result<()> {
+    ) -> Result<i64> {
         let thought_clone = thought.to_string();
         let action_clone = action.to_string();
         let result_clone = result.map(|s| s.to_string());
 
-        self.conn
+        let id = self
+            .conn
             .call(move |conn| {
                 conn.execute(
                     "INSERT INTO decisions (thought, action, result) VALUES (?1, ?2, ?3)",
                     params![thought_clone, action_clone, result_clone],
                 )?;
-                Ok(())
+                Ok(conn.last_insert_rowid())
             })
             .await
             .context("Failed to record decision")?;
 
-        debug!("Recorded decision: {thought} -> {action}");
+        debug!("Recorded decision #{id}: {thought} -> {action}");
+        Ok(id)
+    }
+
+    pub async fn update_decision_result(
+        &self,
+        decision_id: i64,
+        result: &DecisionResult,
+    ) -> Result<()> {
+        let result_json = serde_json::to_string(result)?;
+
+        self.conn
+            .call(move |conn| {
+                conn.execute(
+                    "UPDATE decisions SET result = ?1 WHERE id = ?2",
+                    params![result_json, decision_id],
+                )?;
+                Ok(())
+            })
+            .await
+            .context("Failed to update decision result")?;
+
+        debug!("Updated decision #{decision_id} with result: {result:?}");
         Ok(())
     }
 
@@ -218,6 +399,92 @@ impl StateManager {
                         "[{created_at}] Thought: {thought} | Action: {action} | Result: {result}",
                         result = result.unwrap_or_else(|| "pending".to_string())
                     ))
+                })?;
+
+                let mut results = Vec::new();
+                for decision in decisions {
+                    results.push(decision?);
+                }
+
+                Ok(results)
+            })
+            .await
+            .context("Failed to get recent decisions")?;
+
+        Ok(decisions)
+    }
+
+    pub async fn get_recent_decisions_structured(
+        &self,
+        limit: usize,
+    ) -> Result<Vec<DecisionRecord>> {
+        let decisions = self
+            .conn
+            .call(move |conn| {
+                let mut stmt = conn.prepare(
+                    "SELECT id, thought, action, result, created_at 
+                     FROM decisions 
+                     ORDER BY created_at DESC 
+                     LIMIT ?1",
+                )?;
+
+                let decisions = stmt.query_map(params![limit], |row| {
+                    let id = row.get::<_, i64>(0)?;
+                    let thought = row.get::<_, String>(1)?;
+                    let action_str = row.get::<_, String>(2)?;
+                    let result_str: Option<String> = row.get(3)?;
+                    let created_at_str = row.get::<_, String>(4)?;
+
+                    // Parse action and parameters from the stored string
+                    // Format is "action: <action>, params: <params>" or just plain action
+                    let (action, parameters) = if let Some(idx) = action_str.find(", params:") {
+                        // Has params format: "action: <action>, params: <params>"
+                        let action_part = if action_str.starts_with("action: ") {
+                            action_str[7..idx].trim().to_string() // Skip "action: " and trim
+                        } else {
+                            action_str[..idx].trim().to_string()
+                        };
+                        let params_part = &action_str[idx + 9..]; // Skip ", params: "
+                        let params =
+                            if params_part.trim() != "None" && params_part.trim() != "Some(Null)" {
+                                serde_json::from_str(params_part.trim()).ok()
+                            } else {
+                                None
+                            };
+                        (action_part, params)
+                    } else if action_str.starts_with("action: ") {
+                        // Simple format with "action: " prefix
+                        (action_str[7..].trim().to_string(), None)
+                    } else {
+                        // Plain action string
+                        (action_str.trim().to_string(), None)
+                    };
+
+                    // Parse result if it's JSON
+                    let result =
+                        result_str.and_then(|s| serde_json::from_str::<DecisionResult>(&s).ok());
+
+                    // Parse timestamp
+                    let timestamp = if let Ok(dt) = DateTime::parse_from_rfc3339(&created_at_str) {
+                        dt.with_timezone(&Utc)
+                    } else {
+                        // Fallback for SQLite's default format
+                        let naive = chrono::NaiveDateTime::parse_from_str(
+                            &created_at_str,
+                            "%Y-%m-%d %H:%M:%S",
+                        )
+                        .unwrap_or_else(|_| chrono::Local::now().naive_utc());
+                        DateTime::from_naive_utc_and_offset(naive, Utc)
+                    };
+
+                    Ok(DecisionRecord {
+                        id,
+                        timestamp,
+                        thought,
+                        action,
+                        parameters,
+                        result,
+                    })
                 })?;
 
                 let mut results = Vec::new();
@@ -571,6 +838,7 @@ impl StateManager {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use chrono::Utc;
     use tempfile::NamedTempFile;
 
     #[tokio::test]
@@ -591,11 +859,386 @@ mod tests {
         assert_eq!(value, Some(serde_json::json!("test_value")));
 
         // Test decision recording
-        state
+        let decision_id = state
             .record_decision("test thought", "test action", Some("test result"))
             .await?;
+        assert!(decision_id > 0);
         let decisions = state.get_recent_decisions(1).await?;
         assert_eq!(decisions.len(), 1);
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_decision_recording_with_id() -> Result<()> {
+        let temp_file = NamedTempFile::new()?;
+        let db_path = temp_file
+            .path()
+            .to_str()
+            .context("Failed to get temp file path")?;
+
+        let state = StateManager::new(db_path).await?;
+
+        // Record a decision and get its ID
+        let decision_id = state
+            .record_decision(
+                "test thought",
+                "action: use_tool:test, params: Some(Object {\"key\": \"value\"})",
+                None,
+            )
+            .await?;
+
+        assert!(decision_id > 0, "Decision ID should be positive");
+
+        // Verify we can update the decision result
+        let result = DecisionResult {
+            status: "success".to_string(),
+            summary: Some("Test completed successfully".to_string()),
+            error: None,
+            duration_ms: Some(123),
+        };
+
+        state.update_decision_result(decision_id, &result).await?;
+
+        // Verify the result was updated
+        let decisions = state.get_recent_decisions_structured(1).await?;
+        assert_eq!(decisions.len(), 1);
+
+        let decision = &decisions[0];
+        assert_eq!(decision.id, decision_id);
+        assert_eq!(decision.thought, "test thought");
+        assert!(decision.result.is_some());
+
+        let stored_result = decision.result.as_ref().unwrap();
+        assert_eq!(stored_result.status, "success");
+        assert_eq!(
+            stored_result.summary,
+            Some("Test completed successfully".to_string())
+        );
+        assert_eq!(stored_result.duration_ms, Some(123));
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_structured_decision_parsing() -> Result<()> {
+        let temp_file = NamedTempFile::new()?;
+        let db_path = temp_file
+            .path()
+            .to_str()
+            .context("Failed to get temp file path")?;
+
+        let state = StateManager::new(db_path).await?;
+
+        // Test parsing of action with parameters
+        let _id1 = state
+            .record_decision(
+                "thought 1",
+                r#"action: use_tool:http:http_get, params: {"url": "https://example.com"}"#,
+                None,
+            )
+            .await?;
+
+        // Test parsing of action without parameters
+        let _id2 = state
+            .record_decision("thought 2", "action: wait, params: None", None)
+            .await?;
+
+        // Test simple action format (without the "action: " prefix)
+        let _id3 = state
+            .record_decision("thought 3", "action: simple_action", None)
+            .await?;
+
+        let decisions = state.get_recent_decisions_structured(3).await?;
+        assert_eq!(decisions.len(), 3);
+
+        // Decisions are returned in DESC order (most recent first)
+        // So the actual order is: simple_action (id3), wait (id2), use_tool (id1)
+
+        // Check first decision (oldest, with parameters) - id1
+        assert_eq!(decisions[0].action, "use_tool:http:http_get");
+        assert!(decisions[0].parameters.is_some());
+        assert_eq!(
+            decisions[0].parameters.as_ref().unwrap()["url"],
+            "https://example.com"
+        );
+
+        // Check second decision (no parameters) - id2
+        assert_eq!(decisions[1].action, "wait");
+        assert!(decisions[1].parameters.is_none());
+
+        // Check third decision (most recent, simple format) - id3
+        assert_eq!(decisions[2].action, "simple_action");
+        assert!(decisions[2].parameters.is_none());
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_tool_result_visibility() -> Result<()> {
+        let temp_file = NamedTempFile::new()?;
+        let db_path = temp_file
+            .path()
+            .to_str()
+            .context("Failed to get temp file path")?;
+
+        let state = StateManager::new(db_path).await?;
+
+        // Store multiple tool results
+        for i in 1..=5 {
+            let key = format!(
+                "tool_result_{}",
+                Utc::now().timestamp_nanos_opt().unwrap_or(i)
+            );
+            let value = serde_json::json!({
+                "tool": format!("test_tool_{}", i),
+                "success": true,
+                "content": format!("This is result {} with some content", i),
+                "timestamp": Utc::now().to_rfc3339(),
+            });
+            state.remember(&key, value).await?;
+            tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
+        }
+
+        // Store some other memory entries
+        state
+            .remember("agent_id", serde_json::json!("test-agent"))
+            .await?;
+        state
+            .remember("initial_goals", serde_json::json!("test goals"))
+            .await?;
+
+        // Get memory summary
+        let summary = state.get_memory_summary(20, 10000).await?;
+
+        let summary_obj = summary
+            .as_object()
+            .context("Memory summary should be an object")?;
+
+        // Should include the 3 most recent tool results
+        let tool_result_count = summary_obj
+            .keys()
+            .filter(|k| k.starts_with("tool_result_"))
+            .count();
+
+        assert_eq!(
+            tool_result_count, 3,
+            "Should show exactly 3 most recent tool results"
+        );
+
+        // Should also include other important memory
+        assert!(summary_obj.contains_key("agent_id"));
+        assert!(summary_obj.contains_key("initial_goals"));
+        assert!(summary_obj.contains_key("_memory_stats"));
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_count_based_filtering() -> Result<()> {
+        let temp_file = NamedTempFile::new()?;
+        let db_path = temp_file
+            .path()
+            .to_str()
+            .context("Failed to get temp file path")?;
+
+        let state = StateManager::new(db_path).await?;
+
+        // Create tool results with timestamps in keys for ordering
+        let base_time = 1700000000;
+        for i in 0..10 {
+            let key = format!("tool_result_{}", base_time + i);
+            let value = serde_json::json!({
+                "tool": format!("tool_{}", i),
+                "success": true,
+                "content": format!("Result {}", i),
+                "timestamp": format!("2024-01-0{}T12:00:00Z", i),
+            });
+            state.remember(&key, value).await?;
+        }
+
+        // Get memory summary with limited entries
+        let summary = state.get_memory_summary(10, 50000).await?;
+
+        let summary_obj = summary
+            .as_object()
+            .context("Memory summary should be an object")?;
+
+        // Count tool results in summary
+        let tool_results: Vec<_> = summary_obj
+            .keys()
+            .filter(|k| k.starts_with("tool_result_"))
+            .collect();
+
+        // Should have exactly 3 tool results (count-based limit)
+        assert_eq!(
+            tool_results.len(),
+            3,
+            "Should return exactly 3 tool results"
+        );
+
+        // Verify they are the most recent ones (highest timestamps)
+        for key in &tool_results {
+            let num: i32 = key.trim_start_matches("tool_result_").parse().unwrap();
+            assert!(
+                num >= base_time + 7,
+                "Should include only the most recent results"
+            );
+        }
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_memory_truncation() -> Result<()> {
+        let temp_file = NamedTempFile::new()?;
+        let db_path = temp_file
+            .path()
+            .to_str()
+            .context("Failed to get temp file path")?;
+
+        let state = StateManager::new(db_path).await?;
+
+        // Store a tool result with very large content
+        let large_content = "x".repeat(2000);
+        let key = format!(
+            "tool_result_{}",
+            Utc::now().timestamp_nanos_opt().unwrap_or(1)
+        );
+        let value = serde_json::json!({
+            "tool": "test_tool",
+            "success": true,
+            "content": large_content.clone(),
+            "truncated_content": large_content.clone(),
+        });
+        state.remember(&key, value).await?;
+
+        // Get memory summary
+        let summary = state.get_memory_summary(10, 50000).await?;
+
+        let summary_obj = summary
+            .as_object()
+            .context("Memory summary should be an object")?;
+
+        // Find the tool result
+        let tool_result = summary_obj
+            .get(&key)
+            .context("Tool result should be in summary")?;
+
+        // Check that content is truncated
+        if let Some(truncated) = tool_result.get("truncated_content") {
+            let content_str = truncated.as_str().unwrap();
+            assert!(
+                content_str.ends_with("... [truncated]"),
+                "Large content should be truncated"
+            );
+            assert!(
+                content_str.len() < 1100,
+                "Truncated content should be around 1000 chars"
+            );
+        }
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_decision_result_update() -> Result<()> {
+        let temp_file = NamedTempFile::new()?;
+        let db_path = temp_file
+            .path()
+            .to_str()
+            .context("Failed to get temp file path")?;
+
+        let state = StateManager::new(db_path).await?;
+
+        // Record a decision
+        let decision_id = state
+            .record_decision("test thought", "test action", None)
+            .await?;
+
+        // Update with success result
+        let success_result = DecisionResult {
+            status: "success".to_string(),
+            summary: Some("Operation completed".to_string()),
+            error: None,
+            duration_ms: Some(500),
+        };
+        state
+            .update_decision_result(decision_id, &success_result)
+            .await?;
+
+        // Verify update
+        let decisions = state.get_recent_decisions_structured(1).await?;
+        let decision = &decisions[0];
+        assert_eq!(decision.result.as_ref().unwrap().status, "success");
+        assert_eq!(decision.result.as_ref().unwrap().duration_ms, Some(500));
+
+        // Update with error result
+        let error_result = DecisionResult {
+            status: "error".to_string(),
+            summary: None,
+            error: Some("Connection timeout".to_string()),
+            duration_ms: Some(30000),
+        };
+        state
+            .update_decision_result(decision_id, &error_result)
+            .await?;
+
+        // Verify error update
+        let decisions = state.get_recent_decisions_structured(1).await?;
+        let decision = &decisions[0];
+        assert_eq!(decision.result.as_ref().unwrap().status, "error");
+        assert_eq!(
+            decision.result.as_ref().unwrap().error,
+            Some("Connection timeout".to_string())
+        );
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_memory_stats_accuracy() -> Result<()> {
+        let temp_file = NamedTempFile::new()?;
+        let db_path = temp_file
+            .path()
+            .to_str()
+            .context("Failed to get temp file path")?;
+
+        let state = StateManager::new(db_path).await?;
+
+        // Add various memory entries
+        state.remember("key1", serde_json::json!("value1")).await?;
+        state.remember("key2", serde_json::json!("value2")).await?;
+        state
+            .remember("tool_result_1", serde_json::json!({"data": "result1"}))
+            .await?;
+        state
+            .remember("tool_result_2", serde_json::json!({"data": "result2"}))
+            .await?;
+
+        // Get full memory to check total count
+        let full_memory = state.get_memory().await?;
+        let full_obj = full_memory.as_object().unwrap();
+        assert_eq!(full_obj.len(), 4, "Should have 4 total entries");
+
+        // Get summary with limits
+        let summary = state.get_memory_summary(10, 50000).await?;
+        let summary_obj = summary.as_object().unwrap();
+
+        // Check memory stats
+        let stats = summary_obj
+            .get("_memory_stats")
+            .context("Should have memory stats")?
+            .as_object()
+            .context("Stats should be an object")?;
+
+        assert_eq!(stats.get("total_entries").unwrap().as_i64().unwrap(), 4);
+        // shown_entries includes _memory_stats itself
+        let shown = stats.get("shown_entries").unwrap().as_i64().unwrap();
+        assert!(
+            shown > 0 && shown <= 5,
+            "Should show some but not too many entries"
+        );
 
         Ok(())
     }

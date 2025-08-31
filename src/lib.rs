@@ -1,7 +1,9 @@
 use anyhow::Result;
-use chrono::Utc;
+use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use std::path::PathBuf;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tracing::{error, info, warn};
 
 // Export modules
@@ -19,13 +21,32 @@ pub use llm::LLMProvider;
 pub use mcp::{MCPClient, MCPServerConfig};
 pub use state::StateManager;
 
+// Decision tracking types
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DecisionRecord {
+    pub id: i64,
+    pub timestamp: DateTime<Utc>,
+    pub thought: String,
+    pub action: String,
+    pub parameters: Option<Value>,
+    pub result: Option<DecisionResult>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DecisionResult {
+    pub status: String, // "success", "error", "timeout"
+    pub summary: Option<String>,
+    pub error: Option<String>,
+    pub duration_ms: Option<u64>,
+}
+
 // Core agent types
 #[derive(Debug)]
 struct Observation {
     timestamp: chrono::DateTime<Utc>,
     memory: serde_json::Value,
     available_tools: Vec<String>,
-    recent_events: Vec<String>,
+    recent_events: Vec<DecisionRecord>,
 }
 
 #[derive(Debug)]
@@ -68,14 +89,14 @@ impl Replicante {
     async fn observe(&self) -> Result<Observation> {
         info!("Observing environment...");
 
-        // Get current memory state
-        let memory = self.state.get_memory().await?;
+        // Get summarized memory state (max 20 entries, max 10KB)
+        let memory = self.state.get_memory_summary(20, 10_000).await?;
 
         // Get available tools from MCP
         let available_tools = self.mcp.list_tools().await?;
 
-        // Get recent events/decisions
-        let recent_events = self.state.get_recent_decisions(10).await?;
+        // Get recent events/decisions as structured data (limit to 5 for context)
+        let recent_events = self.state.get_recent_decisions_structured(5).await?;
 
         Ok(Observation {
             timestamp: Utc::now(),
@@ -85,23 +106,187 @@ impl Replicante {
         })
     }
 
+    fn generate_example_value(key: &str, schema: &serde_json::Value) -> String {
+        let type_str = schema
+            .get("type")
+            .and_then(|t| t.as_str())
+            .unwrap_or("string");
+
+        match (key, type_str) {
+            ("path", _) | ("file", _) | ("filename", _) => r#""progress.txt""#.to_string(),
+            ("url", _) | ("uri", _) => r#""https://example.com""#.to_string(),
+            ("content", _) | ("data", _) | ("text", _) => r#""Sample content here""#.to_string(),
+            ("command", _) | ("cmd", _) => r#""ls -la""#.to_string(),
+            ("directory", _) | ("dir", _) | ("folder", _) => r#""/workspace""#.to_string(),
+            (_, "boolean") => "true".to_string(),
+            (_, "number") | (_, "integer") => "42".to_string(),
+            (_, "array") => r#"["item1", "item2"]"#.to_string(),
+            (_, "object") => r#"{}"#.to_string(),
+            _ => r#""example_value""#.to_string(),
+        }
+    }
+
+    async fn generate_tool_examples(&self) -> Result<String> {
+        info!("Generating tool examples from MCP schemas...");
+
+        // Get tools with their full schemas
+        let tools = self.mcp.get_tools_with_schemas().await?;
+        info!("Found {} total tools", tools.len());
+
+        let mut examples = Vec::new();
+
+        // Prioritize tools that have been failing (especially write_file)
+        let prioritized_tools: Vec<_> = tools
+            .iter()
+            .filter(|t| {
+                t.name.contains("write_file")
+                    || t.name.contains("http_get")
+                    || t.name.contains("list_directory")
+            })
+            .chain(tools.iter())
+            .take(3)
+            .collect();
+
+        info!(
+            "Generating examples for {} prioritized tools",
+            prioritized_tools.len()
+        );
+
+        for tool in prioritized_tools {
+            if let Some(schema) = &tool.parameters {
+                info!(
+                    "Processing tool '{}' with schema: {}",
+                    tool.name,
+                    serde_json::to_string_pretty(schema).unwrap_or_else(|_| "invalid".to_string())
+                );
+
+                // Actually parse the schema JSON
+                if let Some(properties) = schema.get("properties").and_then(|p| p.as_object()) {
+                    let mut param_examples = Vec::new();
+
+                    // Get required fields if specified
+                    let required_fields = schema
+                        .get("required")
+                        .and_then(|r| r.as_array())
+                        .map(|arr| arr.iter().filter_map(|v| v.as_str()).collect::<Vec<_>>())
+                        .unwrap_or_default();
+
+                    info!(
+                        "Tool '{}' has {} properties, {} required",
+                        tool.name,
+                        properties.len(),
+                        required_fields.len()
+                    );
+
+                    // Generate example values for required parameters
+                    for (key, prop_schema) in properties.iter() {
+                        if required_fields.contains(&key.as_str()) || required_fields.is_empty() {
+                            let example_value = Self::generate_example_value(key, prop_schema);
+                            info!(
+                                "  Parameter '{}': type={:?}, example={}",
+                                key,
+                                prop_schema.get("type"),
+                                example_value
+                            );
+                            param_examples.push(format!(r#""{}": {}"#, key, example_value));
+
+                            // Only show first 2-3 params for brevity
+                            if param_examples.len() >= 2 {
+                                break;
+                            }
+                        }
+                    }
+
+                    if !param_examples.is_empty() {
+                        let action_desc = match tool.name.as_str() {
+                            name if name.contains("write_file") => {
+                                "I need to write content to a file"
+                            }
+                            name if name.contains("http_get") => {
+                                "I need to fetch information from a URL"
+                            }
+                            name if name.contains("list_directory") => {
+                                "I need to list directory contents"
+                            }
+                            name if name.contains("run_command") => {
+                                "I need to execute a shell command"
+                            }
+                            _ => "I need to use this tool",
+                        };
+
+                        let example = format!(
+                            r#"{{
+  "reasoning": "{}.",
+  "confidence": 0.9,
+  "action": "use_tool:{}",
+  "parameters": {{{}}}
+}}"#,
+                            action_desc,
+                            tool.name,
+                            param_examples.join(", ")
+                        );
+
+                        info!("Generated example for '{}': {}", tool.name, example);
+                        examples.push(example);
+                    } else {
+                        warn!("No parameters generated for tool '{}'", tool.name);
+                    }
+                } else {
+                    warn!("Tool '{}' has no properties in schema", tool.name);
+                }
+            } else {
+                info!("Tool '{}' has no parameter schema", tool.name);
+            }
+        }
+
+        if examples.is_empty() {
+            warn!("No tool examples generated, using fallback");
+            // Fallback to generic example
+            examples.push(
+                r#"{
+  "reasoning": "I need to explore available tools.",
+  "confidence": 0.8,
+  "action": "explore"
+}"#
+                .to_string(),
+            );
+        } else {
+            info!("Successfully generated {} tool examples", examples.len());
+        }
+
+        let result = examples.join("\n\n");
+        info!("Final tool examples:\n{}", result);
+        Ok(result)
+    }
+
     async fn think(&self, observation: Observation) -> Result<Thought> {
         info!("Thinking about current situation...");
 
-        // Generate tool format list from available tools
+        // Generate tool format list from available tools (simplified for context)
         let tool_formats = observation
             .available_tools
             .iter()
-            .map(|tool| format!("- \"use_tool:{}\" - use the {} tool", tool, tool))
+            .take(10) // Limit to first 10 tools to save context
+            .map(|tool| format!("- \"use_tool:{}\"", tool))
             .collect::<Vec<_>>()
             .join("\n");
+
+        let tool_formats = if observation.available_tools.len() > 10 {
+            format!(
+                "{}\n... and {} more tools",
+                tool_formats,
+                observation.available_tools.len() - 10
+            )
+        } else {
+            tool_formats
+        };
 
         // Build action formats including discovered tools and built-in actions
         let action_formats = format!(
             r#"{}
-- "explore" - discover available tools (use sparingly)
 - "remember:key" - persist knowledge (use parameters for value)
-- "wait" - wait for a period of time"#,
+- "wait" - wait for a period of time
+- "explore" - (deprecated - tools are auto-discovered)"#,
             tool_formats
         );
 
@@ -129,6 +314,19 @@ impl Replicante {
             action_guidelines.join("\n")
         };
 
+        // Generate dynamic examples based on actual tool schemas
+        let tool_examples = self.generate_tool_examples().await.unwrap_or_else(|e| {
+            error!("Failed to generate tool examples: {}", e);
+            // Fallback to basic examples if generation fails
+            r#"{
+  "reasoning": "I need to take action.",
+  "confidence": 0.8,
+  "action": "explore"
+}"#
+            .to_string()
+        });
+
+        // Log the full prompt being sent to the LLM
         let prompt = format!(
             r#"You are an autonomous AI agent with the ID: {id}
             
@@ -140,14 +338,15 @@ Current observation:
 - Time: {timestamp}
 - Available tools: {tools:?}
 - Memory: {memory}
-- Recent events: {events:?}
+- Recent events:
+{events}
 
-IMPORTANT: You must make concrete progress toward your goals. Exploration alone is not progress.
+IMPORTANT: You must make concrete progress toward your goals.
 Take immediate action by:
 
 Priority 1: Take concrete actions that create or change something
 Priority 2: Gather specific information needed for the next action  
-Priority 3: Only explore when you have no other options
+Priority 3: Use the tools available to make progress
 
 Action Guidelines:
 {guidelines}
@@ -158,20 +357,11 @@ Format your response as JSON with keys: reasoning, confidence, action, parameter
 Available action formats:
 {action_formats}
 
-Example responses:
-{{
-  "reasoning": "I need to fetch information from a website to understand the topic better.",
-  "confidence": 0.9,
-  "action": "use_tool:http:http_get",
-  "parameters": {{"url": "https://example.com"}}
-}}
+IMPORTANT: Pay careful attention to the exact parameter names required for each tool.
+Example responses showing correct parameter names:
+{tool_examples}
 
-{{
-  "reasoning": "I should explore what tools are available to me.",
-  "confidence": 0.8,
-  "action": "explore"
-}}
-
+Additional examples:
 {{
   "reasoning": "I need to save this important information for later use.",
   "confidence": 0.95,
@@ -183,15 +373,48 @@ Example responses:
             timestamp = observation.timestamp,
             tools = observation.available_tools,
             memory = serde_json::to_string_pretty(&observation.memory)?,
-            events = observation.recent_events,
+            events = serde_json::to_string_pretty(&observation.recent_events)?,
             guidelines = guidelines,
-            action_formats = action_formats
+            action_formats = action_formats,
+            tool_examples = tool_examples
         );
+
+        // Log the complete prompt for debugging
+        info!("=== SENDING PROMPT TO LLM ===");
+        info!("Prompt length: {} characters", prompt.len());
+
+        // Warn if context is too large
+        if prompt.len() > 100_000 {
+            warn!(
+                "Prompt exceeds 100KB ({} chars) - may degrade LLM performance",
+                prompt.len()
+            );
+        }
+        if prompt.len() > 50_000 {
+            info!(
+                "Large prompt detected ({} chars) - consider further optimization",
+                prompt.len()
+            );
+        }
+
+        // Only log full prompt if it's reasonable size (for debugging)
+        if prompt.len() < 50_000 {
+            info!("Full prompt:\n{}", prompt);
+        } else {
+            info!(
+                "Prompt too large to log fully. First 1000 chars:\n{}",
+                &prompt[..1000.min(prompt.len())]
+            );
+        }
+        info!("=== END OF PROMPT ===");
 
         let response = self.llm.complete(&prompt).await?;
 
         // Log the raw LLM response for debugging
-        info!("LLM response: {response}");
+        info!("=== LLM RESPONSE ===");
+        info!("Response length: {} characters", response.len());
+        info!("Full response: {}", response);
+        info!("=== END OF RESPONSE ===");
 
         // Parse LLM response - handle both JSON and plain text
         let thought_json: serde_json::Value = if let Ok(json) = serde_json::from_str(&response) {
@@ -236,7 +459,7 @@ Example responses:
         })
     }
 
-    async fn decide(&self, thought: Thought) -> Result<Action> {
+    async fn decide(&self, thought: Thought) -> Result<(Action, i64)> {
         info!("Deciding on action based on thought...");
 
         // Check if we have learned patterns for this context
@@ -252,7 +475,8 @@ Example responses:
                 info!("Using learned action based on past success");
 
                 // Record the decision with learning influence
-                self.state
+                let decision_id = self
+                    .state
                     .record_decision(
                         &format!("{} [learned]", thought.reasoning),
                         &format!(
@@ -263,12 +487,14 @@ Example responses:
                     )
                     .await?;
 
-                return self.execute_decision(thought).await;
+                let action = self.execute_decision(thought).await?;
+                return Ok((action, decision_id));
             }
         }
 
         // Record the thought normally
-        self.state
+        let decision_id = self
+            .state
             .record_decision(
                 &thought.reasoning,
                 &format!(
@@ -279,7 +505,8 @@ Example responses:
             )
             .await?;
 
-        self.execute_decision(thought).await
+        let action = self.execute_decision(thought).await?;
+        Ok((action, decision_id))
     }
 
     async fn execute_decision(&self, thought: Thought) -> Result<Action> {
@@ -327,8 +554,9 @@ Example responses:
         )
     }
 
-    async fn act(&mut self, action: Action) -> Result<()> {
+    async fn act(&mut self, action: Action, decision_id: i64) -> Result<()> {
         info!("Executing action: {:?}", action);
+        let start_time = Instant::now();
 
         match action {
             Action::UseTool { name, params } => {
@@ -351,14 +579,54 @@ Example responses:
                         // Update capability tracking
                         self.state.record_capability(&name, None, true).await?;
 
+                        // Store only a summary of large results
+                        let result_str = serde_json::to_string(&result)?;
+                        let result_to_store = if result_str.len() > 5000 {
+                            // For large results, provide a useful summary
+                            let truncated_content = if let Some(content) = result.get("content") {
+                                // If there's a content field, truncate that specifically
+                                content
+                                    .as_str()
+                                    .unwrap_or(&result_str)
+                                    .chars()
+                                    .take(2000)
+                                    .collect::<String>()
+                            } else {
+                                // Otherwise truncate the whole result
+                                result_str.chars().take(2000).collect::<String>()
+                            };
+
+                            serde_json::json!({
+                                "success": true,
+                                "tool": name,
+                                "summary": format!("Large result truncated (original: {} bytes)", result_str.len()),
+                                "truncated_content": truncated_content,
+                                "timestamp": Utc::now()
+                            })
+                        } else {
+                            result
+                        };
+
                         self.state
                             .remember(
                                 &format!(
                                     "tool_result_{timestamp}",
                                     timestamp = Utc::now().timestamp()
                                 ),
-                                result,
+                                result_to_store.clone(),
                             )
+                            .await?;
+
+                        // Update decision with success result
+                        let duration_ms = start_time.elapsed().as_millis() as u64;
+                        let result = DecisionResult {
+                            status: "success".to_string(),
+                            summary: Some(format!("Tool {} executed successfully", name)),
+                            error: None,
+                            duration_ms: Some(duration_ms),
+                        };
+                        self.state
+                            .update_decision_result(decision_id, &result)
                             .await?;
                     }
                     Err(e) => {
@@ -390,23 +658,69 @@ Example responses:
 
                         // Update capability tracking
                         self.state.record_capability(&name, None, false).await?;
+
+                        // Update decision with error result
+                        let duration_ms = start_time.elapsed().as_millis() as u64;
+                        let result = DecisionResult {
+                            status: "error".to_string(),
+                            summary: None,
+                            error: Some(e.to_string()),
+                            duration_ms: Some(duration_ms),
+                        };
+                        self.state
+                            .update_decision_result(decision_id, &result)
+                            .await?;
                     }
                 }
             }
             Action::Remember { key, value } => {
                 info!("Remembering: {key} = {value:?}");
-                self.state.remember(&key, value).await?;
+                self.state.remember(&key, value.clone()).await?;
+
+                // Update decision with success result
+                let duration_ms = start_time.elapsed().as_millis() as u64;
+                let result = DecisionResult {
+                    status: "success".to_string(),
+                    summary: Some(format!("Remembered key: {}", key)),
+                    error: None,
+                    duration_ms: Some(duration_ms),
+                };
+                self.state
+                    .update_decision_result(decision_id, &result)
+                    .await?;
             }
             Action::Wait { duration } => {
                 info!("Waiting for {duration:?}");
                 tokio::time::sleep(duration).await;
+
+                // Update decision with success result
+                let duration_ms = start_time.elapsed().as_millis() as u64;
+                let result = DecisionResult {
+                    status: "success".to_string(),
+                    summary: Some(format!("Waited for {:?}", duration)),
+                    error: None,
+                    duration_ms: Some(duration_ms),
+                };
+                self.state
+                    .update_decision_result(decision_id, &result)
+                    .await?;
             }
             Action::Explore => {
                 info!("Exploring capabilities...");
-                // Discover new tools or opportunities
-                let tools = self.mcp.discover_tools().await?;
+                // Tools are already discovered automatically in each observation
+                // This action is now a no-op to avoid storing redundant data
+                // Could be used for future exploration features
+
+                // Update decision with success result
+                let duration_ms = start_time.elapsed().as_millis() as u64;
+                let result = DecisionResult {
+                    status: "success".to_string(),
+                    summary: Some("Explored capabilities".to_string()),
+                    error: None,
+                    duration_ms: Some(duration_ms),
+                };
                 self.state
-                    .remember("discovered_tools", serde_json::json!(tools))
+                    .update_decision_result(decision_id, &result)
                     .await?;
             }
         }
@@ -416,7 +730,7 @@ Example responses:
 
     async fn learn(&mut self) -> Result<()> {
         // Analyze recent decisions and outcomes
-        let recent = self.state.get_recent_decisions(10).await?;
+        let recent = self.state.get_recent_decisions_structured(10).await?;
 
         if !recent.is_empty() {
             info!(
@@ -465,10 +779,10 @@ Example responses:
         let thought = self.think(observation).await?;
 
         // Decide
-        let action = self.decide(thought).await?;
+        let (action, decision_id) = self.decide(thought).await?;
 
         // Act
-        self.act(action).await?;
+        self.act(action, decision_id).await?;
 
         // Learn
         self.learn().await?;
@@ -834,6 +1148,295 @@ mod tests {
         let err2 = result2.unwrap_err();
         assert!(err2.to_string().contains("Invalid action format"));
         assert!(err2.to_string().contains("unknown_action"));
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_generate_example_value() -> Result<()> {
+        use serde_json::json;
+
+        // Test path-like parameters
+        assert_eq!(
+            Replicante::generate_example_value("path", &json!({"type": "string"})),
+            r#""progress.txt""#
+        );
+        assert_eq!(
+            Replicante::generate_example_value("filename", &json!({"type": "string"})),
+            r#""progress.txt""#
+        );
+        assert_eq!(
+            Replicante::generate_example_value("file", &json!({"type": "string"})),
+            r#""progress.txt""#
+        );
+
+        // Test URL parameters
+        assert_eq!(
+            Replicante::generate_example_value("url", &json!({"type": "string"})),
+            r#""https://example.com""#
+        );
+        assert_eq!(
+            Replicante::generate_example_value("uri", &json!({"type": "string"})),
+            r#""https://example.com""#
+        );
+
+        // Test content parameters
+        assert_eq!(
+            Replicante::generate_example_value("content", &json!({"type": "string"})),
+            r#""Sample content here""#
+        );
+        assert_eq!(
+            Replicante::generate_example_value("data", &json!({"type": "string"})),
+            r#""Sample content here""#
+        );
+        assert_eq!(
+            Replicante::generate_example_value("text", &json!({"type": "string"})),
+            r#""Sample content here""#
+        );
+
+        // Test command parameters
+        assert_eq!(
+            Replicante::generate_example_value("command", &json!({"type": "string"})),
+            r#""ls -la""#
+        );
+        assert_eq!(
+            Replicante::generate_example_value("cmd", &json!({"type": "string"})),
+            r#""ls -la""#
+        );
+
+        // Test directory parameters
+        assert_eq!(
+            Replicante::generate_example_value("directory", &json!({"type": "string"})),
+            r#""/workspace""#
+        );
+        assert_eq!(
+            Replicante::generate_example_value("dir", &json!({"type": "string"})),
+            r#""/workspace""#
+        );
+        assert_eq!(
+            Replicante::generate_example_value("folder", &json!({"type": "string"})),
+            r#""/workspace""#
+        );
+
+        // Test boolean type
+        assert_eq!(
+            Replicante::generate_example_value("enabled", &json!({"type": "boolean"})),
+            "true"
+        );
+        assert_eq!(
+            Replicante::generate_example_value("append", &json!({"type": "boolean"})),
+            "true"
+        );
+
+        // Test number/integer type
+        assert_eq!(
+            Replicante::generate_example_value("count", &json!({"type": "integer"})),
+            "42"
+        );
+        assert_eq!(
+            Replicante::generate_example_value("size", &json!({"type": "number"})),
+            "42"
+        );
+
+        // Test array type
+        assert_eq!(
+            Replicante::generate_example_value("items", &json!({"type": "array"})),
+            r#"["item1", "item2"]"#
+        );
+
+        // Test object type
+        assert_eq!(
+            Replicante::generate_example_value("config", &json!({"type": "object"})),
+            r#"{}"#
+        );
+
+        // Test unknown parameter with no type info
+        assert_eq!(
+            Replicante::generate_example_value("unknown", &json!({})),
+            r#""example_value""#
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_schema_parameter_extraction() -> Result<()> {
+        let schema = json!({
+            "type": "object",
+            "properties": {
+                "path": {"type": "string", "description": "File path"},
+                "content": {"type": "string", "description": "Content to write"},
+                "append": {"type": "boolean", "default": false, "description": "Append mode"}
+            },
+            "required": ["path", "content"]
+        });
+
+        // Extract properties
+        let properties = schema["properties"].as_object().unwrap();
+        assert_eq!(properties.len(), 3);
+        assert!(properties.contains_key("path"));
+        assert!(properties.contains_key("content"));
+        assert!(properties.contains_key("append"));
+
+        // Extract required fields
+        let required = schema["required"].as_array().unwrap();
+        assert_eq!(required.len(), 2);
+        assert!(required.contains(&json!("path")));
+        assert!(required.contains(&json!("content")));
+        assert!(!required.contains(&json!("append")));
+
+        // Check property types
+        assert_eq!(properties["path"]["type"], "string");
+        assert_eq!(properties["content"]["type"], "string");
+        assert_eq!(properties["append"]["type"], "boolean");
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_decision_tracking_flow() -> Result<()> {
+        use crate::state::StateManager;
+        use tempfile::NamedTempFile;
+
+        // Create temporary database
+        let temp_file = NamedTempFile::new()?;
+        let db_path = temp_file.path().to_str().unwrap();
+
+        // Create state manager directly
+        let state = StateManager::new(db_path).await?;
+
+        // Simulate a decision
+        let decision_id = state
+            .record_decision("Test thought", "action: test_action, params: None", None)
+            .await?;
+
+        assert!(decision_id > 0, "Should return valid decision ID");
+
+        // Update decision result
+        let result = DecisionResult {
+            status: "success".to_string(),
+            summary: Some("Test completed".to_string()),
+            error: None,
+            duration_ms: Some(100),
+        };
+
+        state.update_decision_result(decision_id, &result).await?;
+
+        // Verify decision was updated
+        let decisions = state.get_recent_decisions_structured(1).await?;
+        assert_eq!(decisions.len(), 1);
+        assert_eq!(decisions[0].id, decision_id);
+        assert_eq!(decisions[0].result.as_ref().unwrap().status, "success");
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_tool_result_storage() -> Result<()> {
+        use crate::state::StateManager;
+        use chrono::Utc;
+        use tempfile::NamedTempFile;
+
+        // Create temporary database
+        let temp_file = NamedTempFile::new()?;
+        let db_path = temp_file.path().to_str().unwrap();
+
+        // Create state manager directly
+        let state = StateManager::new(db_path).await?;
+
+        // Store a tool result
+        let tool_result = json!({
+            "tool": "test_tool",
+            "success": true,
+            "content": "Test content that should be visible",
+            "timestamp": Utc::now().to_rfc3339(),
+        });
+
+        let key = format!(
+            "tool_result_{}",
+            Utc::now().timestamp_nanos_opt().unwrap_or(1)
+        );
+        state.remember(&key, tool_result.clone()).await?;
+
+        // Get memory summary
+        let summary = state.get_memory_summary(10, 10000).await?;
+        let summary_obj = summary.as_object().unwrap();
+
+        // Verify tool result is included
+        assert!(
+            summary_obj.contains_key(&key),
+            "Tool result should be in memory summary"
+        );
+
+        let stored_result = summary_obj.get(&key).unwrap();
+        assert_eq!(stored_result["tool"], "test_tool");
+        assert_eq!(stored_result["success"], true);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_decision_record_serialization() -> Result<()> {
+        use chrono::Utc;
+
+        let record = DecisionRecord {
+            id: 1,
+            timestamp: Utc::now(),
+            thought: "Test thought".to_string(),
+            action: "test_action".to_string(),
+            parameters: Some(json!({"key": "value"})),
+            result: Some(DecisionResult {
+                status: "success".to_string(),
+                summary: Some("Completed".to_string()),
+                error: None,
+                duration_ms: Some(100),
+            }),
+        };
+
+        // Serialize to JSON
+        let json = serde_json::to_value(&record)?;
+
+        // Verify fields are present
+        assert_eq!(json["id"], 1);
+        assert_eq!(json["thought"], "Test thought");
+        assert_eq!(json["action"], "test_action");
+        assert_eq!(json["parameters"]["key"], "value");
+        assert_eq!(json["result"]["status"], "success");
+        assert_eq!(json["result"]["duration_ms"], 100);
+
+        // Deserialize back
+        let deserialized: DecisionRecord = serde_json::from_value(json)?;
+        assert_eq!(deserialized.id, record.id);
+        assert_eq!(deserialized.thought, record.thought);
+        assert_eq!(deserialized.result.unwrap().status, "success");
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_decision_result_serialization() -> Result<()> {
+        let result = DecisionResult {
+            status: "error".to_string(),
+            summary: None,
+            error: Some("Connection failed".to_string()),
+            duration_ms: Some(5000),
+        };
+
+        // Serialize to JSON
+        let json = serde_json::to_value(&result)?;
+
+        // Verify fields
+        assert_eq!(json["status"], "error");
+        assert_eq!(json["error"], "Connection failed");
+        assert_eq!(json["duration_ms"], 5000);
+        assert!(json["summary"].is_null());
+
+        // Deserialize back
+        let deserialized: DecisionResult = serde_json::from_value(json)?;
+        assert_eq!(deserialized.status, "error");
+        assert_eq!(deserialized.error, Some("Connection failed".to_string()));
+        assert_eq!(deserialized.duration_ms, Some(5000));
+        assert!(deserialized.summary.is_none());
 
         Ok(())
     }
