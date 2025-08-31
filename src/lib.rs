@@ -33,7 +33,8 @@ struct Thought {
     reasoning: String,
     #[allow(dead_code)]
     confidence: f64,
-    proposed_actions: Vec<String>,
+    action: String,
+    parameters: Option<serde_json::Value>,
 }
 
 #[derive(Debug)]
@@ -102,7 +103,7 @@ impl Replicante {
         let action_formats = format!(
             r#"{}
 - "explore" - discover available tools (use sparingly)
-- "remember:key:value" - persist knowledge
+- "remember:key" - persist knowledge (use parameters for value)
 - "wait" - wait for a period of time"#,
             tool_formats
         );
@@ -154,17 +155,31 @@ Priority 3: Only explore when you have no other options
 Action Guidelines:
 {guidelines}
 
-Respond with your reasoning, confidence level (0-1), and proposed actions.
-Format your response as JSON with keys: reasoning, confidence, proposed_actions
+Respond with your reasoning, confidence level (0-1), and a single action to take.
+Format your response as JSON with keys: reasoning, confidence, action, parameters
 
 Available action formats:
 {action_formats}
 
-Example response:
+Example responses:
 {{
-  "reasoning": "I need to accomplish my next objective. Based on the available tools, I'll take specific actions.",
+  "reasoning": "I need to fetch information from a website to understand the topic better.",
   "confidence": 0.9,
-  "proposed_actions": ["use_tool:http:http_get", "use_tool:filesystem:write_file"]
+  "action": "use_tool:http:http_get",
+  "parameters": {{"url": "https://example.com"}}
+}}
+
+{{
+  "reasoning": "I should explore what tools are available to me.",
+  "confidence": 0.8,
+  "action": "explore"
+}}
+
+{{
+  "reasoning": "I need to save this important information for later use.",
+  "confidence": 0.95,
+  "action": "remember:key_name",
+  "parameters": {{"value": "important data"}}
 }}"#,
             id = self.id,
             goals = self.goals,
@@ -194,21 +209,21 @@ Example response:
                         serde_json::json!({
                             "reasoning": response,
                             "confidence": 0.5,
-                            "proposed_actions": ["explore"]
+                            "action": "explore"
                         })
                     })
                 } else {
                     serde_json::json!({
                         "reasoning": response,
                         "confidence": 0.5,
-                        "proposed_actions": ["explore"]
+                        "action": "explore"
                     })
                 }
             } else {
                 serde_json::json!({
                     "reasoning": response,
                     "confidence": 0.5,
-                    "proposed_actions": ["explore"]
+                    "action": "explore"
                 })
             }
         };
@@ -216,14 +231,11 @@ Example response:
         Ok(Thought {
             reasoning: thought_json["reasoning"].as_str().unwrap_or("").to_string(),
             confidence: thought_json["confidence"].as_f64().unwrap_or(0.5),
-            proposed_actions: thought_json["proposed_actions"]
-                .as_array()
-                .map(|arr| {
-                    arr.iter()
-                        .filter_map(|v| v.as_str().map(String::from))
-                        .collect()
-                })
-                .unwrap_or_default(),
+            action: thought_json["action"]
+                .as_str()
+                .unwrap_or("wait")
+                .to_string(),
+            parameters: thought_json.get("parameters").cloned(),
         })
     }
 
@@ -239,29 +251,22 @@ Example response:
         {
             info!("Found learned pattern with {confidence:.2} confidence: {best_action}");
             // Consider using the learned action if confidence is high enough
-            if confidence > 0.85 && thought.proposed_actions.contains(&best_action) {
+            if confidence > 0.85 && thought.action == best_action {
                 info!("Using learned action based on past success");
-                // Move the learned action to the front
-                let mut reordered = vec![best_action.clone()];
-                for action in &thought.proposed_actions {
-                    if action != &best_action {
-                        reordered.push(action.clone());
-                    }
-                }
-                // Update proposed actions with learned preference
-                let mut updated_thought = thought;
-                updated_thought.proposed_actions = reordered;
 
                 // Record the decision with learning influence
                 self.state
                     .record_decision(
-                        &format!("{} [learned]", updated_thought.reasoning),
-                        &format!("{actions:?}", actions = updated_thought.proposed_actions),
+                        &format!("{} [learned]", thought.reasoning),
+                        &format!(
+                            "action: {}, params: {:?}",
+                            thought.action, thought.parameters
+                        ),
                         None,
                     )
                     .await?;
 
-                return self.execute_decision(updated_thought).await;
+                return self.execute_decision(thought).await;
             }
         }
 
@@ -269,7 +274,10 @@ Example response:
         self.state
             .record_decision(
                 &thought.reasoning,
-                &format!("{actions:?}", actions = thought.proposed_actions),
+                &format!(
+                    "action: {}, params: {:?}",
+                    thought.action, thought.parameters
+                ),
                 None,
             )
             .await?;
@@ -278,28 +286,15 @@ Example response:
     }
 
     async fn execute_decision(&self, thought: Thought) -> Result<Action> {
-        // For now, simple decision logic - can be enhanced
-        if thought.proposed_actions.is_empty() {
+        // Parse the single action
+        if thought.action.is_empty() {
             return Ok(Action::Explore);
         }
 
-        // Parse first proposed action
-        let first_action = &thought.proposed_actions[0];
-
-        if let Some(tool_part) = first_action.strip_prefix("use_tool:") {
+        if let Some(tool_part) = thought.action.strip_prefix("use_tool:") {
             // tool_part is like "filesystem:read_file" - the full MCP tool name
-
-            // Provide sensible default parameters based on the tool
-            let params = if tool_part == "filesystem:list_directory" {
-                // Default to current directory (workspace root)
-                serde_json::json!({"path": "."})
-            } else if tool_part == "filesystem:file_exists" {
-                // Default to checking current directory
-                serde_json::json!({"path": "."})
-            } else {
-                // For other tools, use empty params and let the tool handle defaults
-                serde_json::json!({})
-            };
+            // Use provided parameters or default to empty object
+            let params = thought.parameters.unwrap_or_else(|| serde_json::json!({}));
 
             return Ok(Action::UseTool {
                 name: tool_part.to_string(),
@@ -307,21 +302,22 @@ Example response:
             });
         }
 
-        if first_action.starts_with("remember:") {
-            let parts: Vec<&str> = first_action.splitn(3, ':').collect();
-            if parts.len() >= 2 {
-                return Ok(Action::Remember {
-                    key: parts[1].to_string(),
-                    value: serde_json::json!(parts.get(2).unwrap_or(&"")),
-                });
-            }
+        if thought.action.starts_with("remember:") {
+            let key = thought
+                .action
+                .strip_prefix("remember:")
+                .unwrap_or("memory")
+                .to_string();
+            let value = thought.parameters.unwrap_or_else(|| serde_json::json!(""));
+
+            return Ok(Action::Remember { key, value });
         }
 
-        if first_action == "explore" {
+        if thought.action == "explore" {
             return Ok(Action::Explore);
         }
 
-        if first_action == "wait" {
+        if thought.action == "wait" {
             return Ok(Action::Wait {
                 duration: Duration::from_secs(60),
             });
@@ -369,6 +365,19 @@ Example response:
                     }
                     Err(e) => {
                         warn!("Tool execution failed: {e}");
+
+                        // Store failure in memory so agent can observe it
+                        self.state
+                            .remember(
+                                &format!("tool_result_{}", Utc::now().timestamp()),
+                                serde_json::json!({
+                                    "success": false,
+                                    "tool": name,
+                                    "error": e.to_string(),
+                                    "timestamp": Utc::now()
+                                }),
+                            )
+                            .await?;
 
                         // Record failure pattern
                         self.state
@@ -571,4 +580,232 @@ pub async fn run_sandboxed(config_path: Option<PathBuf>) -> Result<()> {
 
     // Just run the normal agent - sandboxing is handled by infrastructure
     run_agent(config_path).await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    // Helper function to create a test Replicante instance
+    fn create_test_agent() -> Replicante {
+        Replicante {
+            id: "test-agent".to_string(),
+            llm: Box::new(llm::MockLLMProvider::new()),
+            mcp: futures::executor::block_on(MCPClient::new(&[])).unwrap(),
+            state: futures::executor::block_on(StateManager::new(":memory:")).unwrap(),
+            config: Config::default(),
+            goals: "Test goals".to_string(),
+        }
+    }
+
+    // Helper to parse thought from JSON string
+    fn parse_thought_json(json_str: &str) -> Result<Thought> {
+        let thought_json: serde_json::Value = serde_json::from_str(json_str)?;
+        Ok(Thought {
+            reasoning: thought_json["reasoning"].as_str().unwrap_or("").to_string(),
+            confidence: thought_json["confidence"].as_f64().unwrap_or(0.5),
+            action: thought_json["action"]
+                .as_str()
+                .unwrap_or("wait")
+                .to_string(),
+            parameters: thought_json.get("parameters").cloned(),
+        })
+    }
+
+    #[test]
+    fn test_parse_thought_with_tool_and_params() -> Result<()> {
+        let json_response = r#"{
+            "reasoning": "I need to fetch data from the API",
+            "confidence": 0.9,
+            "action": "use_tool:http:http_get",
+            "parameters": {"url": "https://api.example.com"}
+        }"#;
+
+        let thought = parse_thought_json(json_response)?;
+        assert_eq!(thought.action, "use_tool:http:http_get");
+        assert_eq!(
+            thought.parameters.unwrap()["url"],
+            "https://api.example.com"
+        );
+        assert_eq!(thought.confidence, 0.9);
+        Ok(())
+    }
+
+    #[test]
+    fn test_parse_thought_without_params() -> Result<()> {
+        let json_response = r#"{
+            "reasoning": "I should explore available tools",
+            "confidence": 0.8,
+            "action": "explore"
+        }"#;
+
+        let thought = parse_thought_json(json_response)?;
+        assert_eq!(thought.action, "explore");
+        assert!(thought.parameters.is_none());
+        assert_eq!(thought.confidence, 0.8);
+        Ok(())
+    }
+
+    #[test]
+    fn test_parse_thought_remember_action() -> Result<()> {
+        let json_response = r#"{
+            "reasoning": "I need to remember this information",
+            "confidence": 0.95,
+            "action": "remember:important_fact",
+            "parameters": {"value": "Fedimint is a federated e-cash system"}
+        }"#;
+
+        let thought = parse_thought_json(json_response)?;
+        assert_eq!(thought.action, "remember:important_fact");
+        assert!(thought.parameters.is_some());
+        assert_eq!(
+            thought.parameters.unwrap()["value"],
+            "Fedimint is a federated e-cash system"
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_execute_decision_tool_with_params() -> Result<()> {
+        let agent = create_test_agent();
+        let thought = Thought {
+            reasoning: "Testing tool execution".to_string(),
+            confidence: 0.9,
+            action: "use_tool:filesystem:read_file".to_string(),
+            parameters: Some(json!({"path": "test.txt"})),
+        };
+
+        let action = agent.execute_decision(thought).await?;
+        match action {
+            Action::UseTool { name, params } => {
+                assert_eq!(name, "filesystem:read_file");
+                assert_eq!(params["path"], "test.txt");
+            }
+            _ => panic!("Expected UseTool action"),
+        }
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_execute_decision_empty_params() -> Result<()> {
+        let agent = create_test_agent();
+        let thought = Thought {
+            reasoning: "Testing tool without params".to_string(),
+            confidence: 0.9,
+            action: "use_tool:filesystem:list_directory".to_string(),
+            parameters: None,
+        };
+
+        let action = agent.execute_decision(thought).await?;
+        match action {
+            Action::UseTool { name, params } => {
+                assert_eq!(name, "filesystem:list_directory");
+                assert_eq!(params, json!({}));
+            }
+            _ => panic!("Expected UseTool action"),
+        }
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_execute_decision_remember() -> Result<()> {
+        let agent = create_test_agent();
+        let thought = Thought {
+            reasoning: "Testing remember action".to_string(),
+            confidence: 0.9,
+            action: "remember:test_key".to_string(),
+            parameters: Some(json!({"data": "test_value"})),
+        };
+
+        let action = agent.execute_decision(thought).await?;
+        match action {
+            Action::Remember { key, value } => {
+                assert_eq!(key, "test_key");
+                assert_eq!(value, json!({"data": "test_value"}));
+            }
+            _ => panic!("Expected Remember action"),
+        }
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_execute_decision_explore() -> Result<()> {
+        let agent = create_test_agent();
+        let thought = Thought {
+            reasoning: "Testing explore".to_string(),
+            confidence: 0.9,
+            action: "explore".to_string(),
+            parameters: None,
+        };
+
+        let action = agent.execute_decision(thought).await?;
+        assert!(matches!(action, Action::Explore));
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_execute_decision_wait() -> Result<()> {
+        let agent = create_test_agent();
+        let thought = Thought {
+            reasoning: "Testing wait".to_string(),
+            confidence: 0.9,
+            action: "wait".to_string(),
+            parameters: None,
+        };
+
+        let action = agent.execute_decision(thought).await?;
+        assert!(matches!(action, Action::Wait { .. }));
+        Ok(())
+    }
+
+    #[test]
+    fn test_malformed_json_fallback() -> Result<()> {
+        // Test with missing action field
+        let json_response = r#"{
+            "reasoning": "Missing action field",
+            "confidence": 0.5
+        }"#;
+
+        let thought = parse_thought_json(json_response)?;
+        assert_eq!(thought.action, "wait"); // Should default to "wait"
+        assert_eq!(thought.confidence, 0.5);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_parse_thought_with_filesystem_tool() -> Result<()> {
+        let json_response = r#"{
+            "reasoning": "I need to list the workspace directory",
+            "confidence": 0.85,
+            "action": "use_tool:filesystem:list_directory",
+            "parameters": {"path": "/workspace", "recursive": false}
+        }"#;
+
+        let thought = parse_thought_json(json_response)?;
+        assert_eq!(thought.action, "use_tool:filesystem:list_directory");
+        let params = thought.parameters.unwrap();
+        assert_eq!(params["path"], "/workspace");
+        assert_eq!(params["recursive"], false);
+        Ok(())
+    }
+
+    #[test]
+    fn test_parse_thought_with_docker_tool() -> Result<()> {
+        let json_response = r#"{
+            "reasoning": "I need to pull the Fedimint Docker image",
+            "confidence": 0.92,
+            "action": "use_tool:shell:docker_pull",
+            "parameters": {"image": "fedimint/fedimint:latest"}
+        }"#;
+
+        let thought = parse_thought_json(json_response)?;
+        assert_eq!(thought.action, "use_tool:shell:docker_pull");
+        assert_eq!(
+            thought.parameters.unwrap()["image"],
+            "fedimint/fedimint:latest"
+        );
+        Ok(())
+    }
 }
