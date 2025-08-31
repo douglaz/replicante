@@ -157,7 +157,8 @@ impl Replicante {
                 info!(
                     "Processing tool '{}' with schema: {}",
                     tool.name,
-                    serde_json::to_string_pretty(schema).unwrap_or_else(|_| "invalid".to_string())
+                    serde_json::to_string_pretty::<serde_json::Value>(schema)
+                        .unwrap_or_else(|_| "invalid".to_string())
                 );
 
                 // Actually parse the schema JSON

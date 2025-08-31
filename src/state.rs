@@ -239,13 +239,11 @@ impl StateManager {
                         // Truncate large values in tool results
                         if let Some(content) =
                             value.get("truncated_content").or(value.get("content"))
+                            && let Some(s) = content.as_str()
+                            && s.len() > 1000
                         {
-                            if let Some(s) = content.as_str() {
-                                if s.len() > 1000 {
-                                    value["truncated_content"] =
-                                        Value::String(format!("{}... [truncated]", &s[..1000]));
-                                }
-                            }
+                            value["truncated_content"] =
+                                Value::String(format!("{}... [truncated]", &s[..1000]));
                         }
                         memory.insert(key, value);
                         total_size += size.min(1000) as usize; // Count truncated size
@@ -293,10 +291,10 @@ impl StateManager {
 
                     if let Ok(mut value) = serde_json::from_str::<Value>(&value_str) {
                         // Truncate large string values
-                        if let Some(s) = value.as_str() {
-                            if s.len() > 1000 {
-                                value = Value::String(format!("{}... [truncated]", &s[..1000]));
-                            }
+                        if let Some(s) = value.as_str()
+                            && s.len() > 1000
+                        {
+                            value = Value::String(format!("{}... [truncated]", &s[..1000]));
                         }
                         memory.insert(key, value);
                         total_size += size as usize;
