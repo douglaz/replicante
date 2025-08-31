@@ -210,9 +210,9 @@ impl OllamaProvider {
         let timeout_secs = config.timeout_secs.unwrap_or(1800); // 30 minutes default
 
         tracing::info!(
-            "Ollama provider initialized for model '{}' with {} second timeout",
-            config.model,
-            timeout_secs
+            "Ollama provider initialized for model '{model}' with {timeout} second timeout",
+            model = config.model,
+            timeout = timeout_secs
         );
 
         Ok(Self {
