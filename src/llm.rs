@@ -207,13 +207,7 @@ impl OllamaProvider {
             .unwrap_or_else(|| "http://localhost:11434".to_string());
 
         // Use configured timeout, or smart defaults based on model size
-        let timeout_secs = config.timeout_secs.unwrap_or_else(|| {
-            if config.model.contains("70b") || config.model.contains("405b") {
-                1800 // 30 minutes for large models
-            } else {
-                300 // 5 minutes for regular models
-            }
-        });
+        let timeout_secs = config.timeout_secs.unwrap_or(1800); // 30 minutes default
 
         tracing::info!(
             "Ollama provider initialized for model '{}' with {} second timeout",
