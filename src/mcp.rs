@@ -736,12 +736,18 @@ impl MCPClient {
 
             let tool_result: ToolCallResult = serde_json::from_value(result)?;
 
-            // Convert tool result to simplified format
+            // Convert tool result to appropriate format
             if let Some(content) = tool_result.content
                 && !content.is_empty()
             {
                 // Extract text content from the first item
                 if let Some(ContentItem::Text { text }) = content.into_iter().next() {
+                    // Try to parse as JSON to preserve structure
+                    if let Ok(json_value) = serde_json::from_str::<Value>(&text) {
+                        // Return the parsed JSON directly to preserve all fields
+                        return Ok(json_value);
+                    }
+                    // Fall back to simple format if not valid JSON
                     return Ok(serde_json::json!({
                         "success": !tool_result.is_error.unwrap_or(false),
                         "content": text
