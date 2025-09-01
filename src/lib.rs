@@ -38,6 +38,8 @@ pub struct DecisionResult {
     pub summary: Option<String>,
     pub error: Option<String>,
     pub duration_ms: Option<u64>,
+    pub tool_name: Option<String>,  // Which tool/action was executed
+    pub tool_output: Option<Value>, // Smart-truncated tool output
 }
 
 // Core agent types
@@ -494,8 +496,14 @@ Additional examples:
                     .record_decision(
                         &format!("{reasoning} [learned]", reasoning = thought.reasoning),
                         &format!(
-                            "action: {}, params: {:?}",
-                            thought.action, thought.parameters
+                            "action: {}, params: {}",
+                            thought.action,
+                            thought
+                                .parameters
+                                .as_ref()
+                                .map(|p| serde_json::to_string(p)
+                                    .unwrap_or_else(|_| "null".to_string()))
+                                .unwrap_or_else(|| "null".to_string())
                         ),
                         None,
                     )
@@ -507,20 +515,45 @@ Additional examples:
         }
 
         // Record the thought normally
-        let decision_id = self
-            .state
-            .record_decision(
-                &thought.reasoning,
-                &format!(
-                    "action: {}, params: {:?}",
-                    thought.action, thought.parameters
+        let decision_id =
+            self.state
+                .record_decision(
+                    &thought.reasoning,
+                    &format!(
+                    "action: {}, params: {}",
+                    thought.action,
+                    thought.parameters
+                        .as_ref()
+                        .map(|p| serde_json::to_string(p).unwrap_or_else(|_| "null".to_string()))
+                        .unwrap_or_else(|| "null".to_string())
                 ),
-                None,
-            )
-            .await?;
+                    None,
+                )
+                .await?;
 
-        let action = self.execute_decision(thought).await?;
-        Ok((action, decision_id))
+        match self.execute_decision(thought).await {
+            Ok(action) => Ok((action, decision_id)),
+            Err(e) => {
+                // Update decision with error result before propagating the error
+                let error_result = DecisionResult {
+                    status: "error".to_string(),
+                    summary: Some(format!("Failed to parse action: {}", e)),
+                    error: Some(e.to_string()),
+                    duration_ms: Some(0),
+                    tool_name: None,
+                    tool_output: None,
+                };
+                // Log if we fail to update the decision result
+                if let Err(update_err) = self
+                    .state
+                    .update_decision_result(decision_id, &error_result)
+                    .await
+                {
+                    error!("Failed to update decision result for failed action: {update_err}");
+                }
+                Err(e)
+            }
+        }
     }
 
     async fn execute_decision(&self, thought: Thought) -> Result<Action> {
@@ -593,51 +626,61 @@ Additional examples:
                         // Update capability tracking
                         self.state.record_capability(&name, None, true).await?;
 
-                        // Store only a summary of large results
+                        // Smart truncation for large results
                         let result_str = serde_json::to_string(&result)?;
                         let result_to_store = if result_str.len() > 5000 {
-                            // For large results, provide a useful summary
-                            let truncated_content = if let Some(content) = result.get("content") {
-                                // If there's a content field, truncate that specifically
-                                content
-                                    .as_str()
-                                    .unwrap_or(&result_str)
-                                    .chars()
-                                    .take(2000)
-                                    .collect::<String>()
-                            } else {
-                                // Otherwise truncate the whole result
-                                result_str.chars().take(2000).collect::<String>()
-                            };
+                            // Clone the result for smart truncation
+                            let mut truncated = result.clone();
 
-                            serde_json::json!({
-                                "success": true,
-                                "tool": name,
-                                "summary": format!("Large result truncated (original: {size} bytes)", size = result_str.len()),
-                                "truncated_content": truncated_content,
-                                "timestamp": Utc::now()
-                            })
+                            // Apply smart truncation: keep small fields, truncate large ones
+                            if let Some(obj) = truncated.as_object_mut() {
+                                for (_key, value) in obj.iter_mut() {
+                                    // Truncate large string fields
+                                    if let Some(s) = value.as_str() {
+                                        if s.len() > 1000 {
+                                            *value = Value::String(format!(
+                                                "{}... [truncated from {} bytes]",
+                                                &s[..1000.min(s.len())],
+                                                s.len()
+                                            ));
+                                        }
+                                    }
+                                    // Recursively truncate nested objects
+                                    else if let Some(nested_obj) = value.as_object_mut() {
+                                        for (_nested_key, nested_value) in nested_obj.iter_mut() {
+                                            if let Some(s) = nested_value.as_str()
+                                                && s.len() > 1000
+                                            {
+                                                *nested_value = Value::String(format!(
+                                                    "{}... [truncated from {} bytes]",
+                                                    &s[..1000.min(s.len())],
+                                                    s.len()
+                                                ));
+                                            }
+                                        }
+                                    }
+                                }
+                                // Add metadata about truncation
+                                obj.insert("_truncated".to_string(), Value::Bool(true));
+                                obj.insert(
+                                    "_original_size".to_string(),
+                                    Value::Number(serde_json::Number::from(result_str.len())),
+                                );
+                            }
+                            truncated
                         } else {
                             result
                         };
 
-                        self.state
-                            .remember(
-                                &format!(
-                                    "tool_result_{timestamp}",
-                                    timestamp = Utc::now().timestamp()
-                                ),
-                                result_to_store.clone(),
-                            )
-                            .await?;
-
-                        // Update decision with success result
+                        // Update decision with success result including tool output
                         let duration_ms = start_time.elapsed().as_millis() as u64;
                         let result = DecisionResult {
                             status: "success".to_string(),
                             summary: Some(format!("Tool {name} executed successfully")),
                             error: None,
                             duration_ms: Some(duration_ms),
+                            tool_name: Some(name.clone()),
+                            tool_output: Some(result_to_store),
                         };
                         self.state
                             .update_decision_result(decision_id, &result)
@@ -645,22 +688,6 @@ Additional examples:
                     }
                     Err(e) => {
                         warn!("Tool execution failed: {e}");
-
-                        // Store failure in memory so agent can observe it
-                        self.state
-                            .remember(
-                                &format!(
-                                    "tool_result_{timestamp}",
-                                    timestamp = Utc::now().timestamp()
-                                ),
-                                serde_json::json!({
-                                    "success": false,
-                                    "tool": name,
-                                    "error": e.to_string(),
-                                    "timestamp": Utc::now()
-                                }),
-                            )
-                            .await?;
 
                         // Record failure pattern
                         self.state
@@ -676,13 +703,19 @@ Additional examples:
                         // Update capability tracking
                         self.state.record_capability(&name, None, false).await?;
 
-                        // Update decision with error result
+                        // Update decision with error result including error details
                         let duration_ms = start_time.elapsed().as_millis() as u64;
                         let result = DecisionResult {
                             status: "error".to_string(),
-                            summary: None,
+                            summary: Some(format!("Tool {name} failed: {e}")),
                             error: Some(e.to_string()),
                             duration_ms: Some(duration_ms),
+                            tool_name: Some(name.clone()),
+                            tool_output: Some(serde_json::json!({
+                                "success": false,
+                                "error": e.to_string(),
+                                "tool": name
+                            })),
                         };
                         self.state
                             .update_decision_result(decision_id, &result)
@@ -701,6 +734,11 @@ Additional examples:
                     summary: Some(format!("Remembered key: {key}")),
                     error: None,
                     duration_ms: Some(duration_ms),
+                    tool_name: Some("remember".to_string()),
+                    tool_output: Some(serde_json::json!({
+                        "key": key,
+                        "value": value
+                    })),
                 };
                 self.state
                     .update_decision_result(decision_id, &result)
@@ -712,11 +750,17 @@ Additional examples:
 
                 // Update decision with success result
                 let duration_ms = start_time.elapsed().as_millis() as u64;
+                let wait_seconds = duration.as_secs();
                 let result = DecisionResult {
                     status: "success".to_string(),
-                    summary: Some(format!("Waited for {:?}", duration)),
+                    summary: Some(format!("Waited for {}s", wait_seconds)),
                     error: None,
                     duration_ms: Some(duration_ms),
+                    tool_name: Some("wait".to_string()),
+                    tool_output: Some(serde_json::json!({
+                        "waited_seconds": wait_seconds,
+                        "success": true
+                    })),
                 };
                 self.state
                     .update_decision_result(decision_id, &result)
@@ -728,6 +772,8 @@ Additional examples:
                 // This action is now a no-op to avoid storing redundant data
                 // Could be used for future exploration features
 
+                let tools = self.mcp.list_tools().await.unwrap_or_default();
+
                 // Update decision with success result
                 let duration_ms = start_time.elapsed().as_millis() as u64;
                 let result = DecisionResult {
@@ -735,6 +781,11 @@ Additional examples:
                     summary: Some("Explored capabilities".to_string()),
                     error: None,
                     duration_ms: Some(duration_ms),
+                    tool_name: Some("explore".to_string()),
+                    tool_output: Some(serde_json::json!({
+                        "tools_discovered": tools.len(),
+                        "tools": tools
+                    })),
                 };
                 self.state
                     .update_decision_result(decision_id, &result)
@@ -1335,6 +1386,8 @@ mod tests {
             summary: Some("Test completed".to_string()),
             error: None,
             duration_ms: Some(100),
+            tool_name: None,
+            tool_output: None,
         };
 
         state.update_decision_result(decision_id, &result).await?;
@@ -1407,6 +1460,8 @@ mod tests {
                 summary: Some("Completed".to_string()),
                 error: None,
                 duration_ms: Some(100),
+                tool_name: None,
+                tool_output: None,
             }),
         };
 
@@ -1437,6 +1492,8 @@ mod tests {
             summary: None,
             error: Some("Connection failed".to_string()),
             duration_ms: Some(5000),
+            tool_name: None,
+            tool_output: None,
         };
 
         // Serialize to JSON
