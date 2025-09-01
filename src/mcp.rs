@@ -748,6 +748,10 @@ impl MCPClient {
                         return Ok(json_value);
                     }
                     // Fall back to simple format if not valid JSON
+                    debug!(
+                        "Tool result is not valid JSON, using simplified format. Content preview: {}...",
+                        &text.chars().take(100).collect::<String>()
+                    );
                     return Ok(serde_json::json!({
                         "success": !tool_result.is_error.unwrap_or(false),
                         "content": text
