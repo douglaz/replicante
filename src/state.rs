@@ -894,6 +894,8 @@ mod tests {
             summary: Some("Test completed successfully".to_string()),
             error: None,
             duration_ms: Some(123),
+            tool_name: None,
+            tool_output: None,
         };
 
         state.update_decision_result(decision_id, &result).await?;
@@ -1160,6 +1162,8 @@ mod tests {
             summary: Some("Operation completed".to_string()),
             error: None,
             duration_ms: Some(500),
+            tool_name: None,
+            tool_output: None,
         };
         state
             .update_decision_result(decision_id, &success_result)
@@ -1177,6 +1181,8 @@ mod tests {
             summary: None,
             error: Some("Connection timeout".to_string()),
             duration_ms: Some(30000),
+            tool_name: None,
+            tool_output: None,
         };
         state
             .update_decision_result(decision_id, &error_result)
