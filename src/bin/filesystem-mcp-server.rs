@@ -3,29 +3,44 @@
 //! Provides file operations within a sandboxed workspace
 
 use anyhow::{Context, Result, bail};
+use clap::Parser;
 use serde_json::{Value, json};
 use std::io::{self, BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 use tokio::fs;
 use tokio::runtime::Runtime;
 
+/// Command-line arguments for the filesystem MCP server
+#[derive(Parser, Debug)]
+#[command(author, version, about, long_about = None)]
+struct Args {
+    /// Workspace root directory for sandboxed operations
+    #[arg(long, env = "WORKSPACE_PATH", default_value = "/workspace")]
+    workspace: PathBuf,
+
+    /// Enable verbose output
+    #[arg(long, env = "MCP_VERBOSE")]
+    verbose: bool,
+}
+
 /// Filesystem MCP Server implementation
 struct FilesystemMCPServer {
     initialized: bool,
     workspace_root: PathBuf,
     runtime: Runtime,
+    verbose: bool,
 }
 
 impl FilesystemMCPServer {
-    fn new() -> Result<Self> {
-        let workspace_root =
-            std::env::var("WORKSPACE_PATH").unwrap_or_else(|_| "/workspace".to_string());
-
-        let workspace_root = PathBuf::from(workspace_root)
+    fn new(args: Args) -> Result<Self> {
+        let workspace_root = args
+            .workspace
             .canonicalize()
-            .unwrap_or_else(|_| PathBuf::from("/workspace"));
+            .unwrap_or_else(|_| args.workspace.clone());
 
-        eprintln!("[Filesystem MCP] Workspace root: {:?}", workspace_root);
+        if args.verbose {
+            eprintln!("[Filesystem MCP] Workspace root: {:?}", workspace_root);
+        }
 
         let runtime = Runtime::new()?;
 
@@ -33,6 +48,7 @@ impl FilesystemMCPServer {
             initialized: false,
             workspace_root,
             runtime,
+            verbose: args.verbose,
         })
     }
 
@@ -70,13 +86,17 @@ impl FilesystemMCPServer {
         let params = request.get("params").unwrap_or(&default_params);
         let request_id = request.get("id");
 
-        eprintln!("[Filesystem MCP] Handling request: {}", method);
+        if self.verbose {
+            eprintln!("[Filesystem MCP] Handling request: {}", method);
+        }
 
         match method {
             "initialize" => Ok(Some(self.handle_initialize(request_id)?)),
             "initialized" => {
                 self.initialized = true;
-                eprintln!("[Filesystem MCP] Client confirmed initialization");
+                if self.verbose {
+                    eprintln!("[Filesystem MCP] Client confirmed initialization");
+                }
                 Ok(None)
             }
             "tools/list" => Ok(Some(self.handle_tools_list(request_id)?)),
@@ -195,7 +215,9 @@ impl FilesystemMCPServer {
         let default_args = json!({});
         let arguments = params.get("arguments").unwrap_or(&default_args);
 
-        eprintln!("[Filesystem MCP] Executing tool: {}", tool_name);
+        if self.verbose {
+            eprintln!("[Filesystem MCP] Executing tool: {}", tool_name);
+        }
 
         let result = match tool_name {
             "read_file" => self.read_file(arguments),
@@ -432,14 +454,21 @@ impl FilesystemMCPServer {
 }
 
 fn main() -> Result<()> {
-    eprintln!("[Filesystem MCP] Starting server...");
+    let args = Args::parse();
+    let verbose = args.verbose;
 
-    let mut server = FilesystemMCPServer::new()?;
+    if verbose {
+        eprintln!("[Filesystem MCP] Starting server...");
+    }
+
+    let mut server = FilesystemMCPServer::new(args)?;
     let stdin = io::stdin();
     let mut stdout = io::stdout();
     let reader = BufReader::new(stdin.lock());
 
-    eprintln!("[Filesystem MCP] Ready for requests");
+    if verbose {
+        eprintln!("[Filesystem MCP] Ready for requests");
+    }
 
     for line in reader.lines() {
         let line = line?;
@@ -447,7 +476,9 @@ fn main() -> Result<()> {
             continue;
         }
 
-        eprintln!("[Filesystem MCP] Received: {}", line);
+        if verbose {
+            eprintln!("[Filesystem MCP] Received: {}", line);
+        }
 
         let request: Value = serde_json::from_str(&line)
             .with_context(|| format!("Failed to parse JSON: {}", line))?;
@@ -457,10 +488,14 @@ fn main() -> Result<()> {
                 let response_str = serde_json::to_string(&response)?;
                 writeln!(stdout, "{}", response_str)?;
                 stdout.flush()?;
-                eprintln!("[Filesystem MCP] Sent response: {}", response_str);
+                if verbose {
+                    eprintln!("[Filesystem MCP] Sent response: {}", response_str);
+                }
             }
             Ok(None) => {
-                eprintln!("[Filesystem MCP] No response needed");
+                if verbose {
+                    eprintln!("[Filesystem MCP] No response needed");
+                }
             }
             Err(e) => {
                 eprintln!("[Filesystem MCP] Error handling request: {}", e);

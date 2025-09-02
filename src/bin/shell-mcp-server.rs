@@ -3,6 +3,7 @@
 //! Provides shell command execution with Docker support
 
 use anyhow::{Context, Result, bail};
+use clap::Parser;
 use serde_json::{Value, json};
 use std::io::{self, BufRead, BufReader, Write};
 use std::path::PathBuf;
@@ -12,38 +13,52 @@ use tokio::process::Command;
 use tokio::runtime::Runtime;
 use tokio::time::timeout;
 
+/// Command-line arguments for the shell MCP server
+#[derive(Parser, Debug)]
+#[command(author, version, about, long_about = None)]
+struct Args {
+    /// Workspace root directory for sandboxed operations
+    #[arg(long, env = "WORKSPACE_PATH", default_value = "/workspace")]
+    workspace: PathBuf,
+
+    /// Allow Docker operations
+    #[arg(long, env = "ALLOW_DOCKER", default_value = "true", action = clap::ArgAction::Set)]
+    allow_docker: bool,
+
+    /// Enable verbose output
+    #[arg(long, env = "MCP_VERBOSE")]
+    verbose: bool,
+}
+
 /// Shell MCP Server implementation
 struct ShellMCPServer {
     initialized: bool,
     workspace_root: PathBuf,
     allow_docker: bool,
     runtime: Runtime,
+    verbose: bool,
 }
 
 impl ShellMCPServer {
-    fn new() -> Result<Self> {
-        let workspace_root =
-            std::env::var("WORKSPACE_PATH").unwrap_or_else(|_| "/workspace".to_string());
-
-        let workspace_root = PathBuf::from(workspace_root)
+    fn new(args: Args) -> Result<Self> {
+        let workspace_root = args
+            .workspace
             .canonicalize()
-            .unwrap_or_else(|_| PathBuf::from("/workspace"));
+            .unwrap_or_else(|_| args.workspace.clone());
 
-        let allow_docker = std::env::var("ALLOW_DOCKER")
-            .unwrap_or_else(|_| "true".to_string())
-            .to_lowercase()
-            == "true";
-
-        eprintln!("[Shell MCP] Workspace root: {:?}", workspace_root);
-        eprintln!("[Shell MCP] Docker support: {}", allow_docker);
+        if args.verbose {
+            eprintln!("[Shell MCP] Workspace root: {:?}", workspace_root);
+            eprintln!("[Shell MCP] Docker support: {}", args.allow_docker);
+        }
 
         let runtime = Runtime::new()?;
 
         Ok(Self {
             initialized: false,
             workspace_root,
-            allow_docker,
+            allow_docker: args.allow_docker,
             runtime,
+            verbose: args.verbose,
         })
     }
 
@@ -73,13 +88,17 @@ impl ShellMCPServer {
         let params = request.get("params").unwrap_or(&default_params);
         let request_id = request.get("id");
 
-        eprintln!("[Shell MCP] Handling request: {}", method);
+        if self.verbose {
+            eprintln!("[Shell MCP] Handling request: {}", method);
+        }
 
         match method {
             "initialize" => Ok(Some(self.handle_initialize(request_id)?)),
             "initialized" => {
                 self.initialized = true;
-                eprintln!("[Shell MCP] Client confirmed initialization");
+                if self.verbose {
+                    eprintln!("[Shell MCP] Client confirmed initialization");
+                }
                 Ok(None)
             }
             "tools/list" => Ok(Some(self.handle_tools_list(request_id)?)),
@@ -232,7 +251,9 @@ impl ShellMCPServer {
         let default_args = json!({});
         let arguments = params.get("arguments").unwrap_or(&default_args);
 
-        eprintln!("[Shell MCP] Executing tool: {}", tool_name);
+        if self.verbose {
+            eprintln!("[Shell MCP] Executing tool: {}", tool_name);
+        }
 
         let result = match tool_name {
             "run_command" => self.run_command(arguments),
@@ -562,14 +583,21 @@ impl ShellMCPServer {
 }
 
 fn main() -> Result<()> {
-    eprintln!("[Shell MCP] Starting server...");
+    let args = Args::parse();
+    let verbose = args.verbose;
 
-    let mut server = ShellMCPServer::new()?;
+    if verbose {
+        eprintln!("[Shell MCP] Starting server...");
+    }
+
+    let mut server = ShellMCPServer::new(args)?;
     let stdin = io::stdin();
     let mut stdout = io::stdout();
     let reader = BufReader::new(stdin.lock());
 
-    eprintln!("[Shell MCP] Ready for requests");
+    if verbose {
+        eprintln!("[Shell MCP] Ready for requests");
+    }
 
     for line in reader.lines() {
         let line = line?;
@@ -577,7 +605,9 @@ fn main() -> Result<()> {
             continue;
         }
 
-        eprintln!("[Shell MCP] Received: {}", line);
+        if verbose {
+            eprintln!("[Shell MCP] Received: {}", line);
+        }
 
         let request: Value = serde_json::from_str(&line)
             .with_context(|| format!("Failed to parse JSON: {}", line))?;
@@ -587,10 +617,14 @@ fn main() -> Result<()> {
                 let response_str = serde_json::to_string(&response)?;
                 writeln!(stdout, "{}", response_str)?;
                 stdout.flush()?;
-                eprintln!("[Shell MCP] Sent response: {}", response_str);
+                if verbose {
+                    eprintln!("[Shell MCP] Sent response: {}", response_str);
+                }
             }
             Ok(None) => {
-                eprintln!("[Shell MCP] No response needed");
+                if verbose {
+                    eprintln!("[Shell MCP] No response needed");
+                }
             }
             Err(e) => {
                 eprintln!("[Shell MCP] Error handling request: {}", e);
@@ -608,6 +642,8 @@ fn main() -> Result<()> {
         }
     }
 
-    eprintln!("[Shell MCP] Server shutting down");
+    if verbose {
+        eprintln!("[Shell MCP] Server shutting down");
+    }
     Ok(())
 }
