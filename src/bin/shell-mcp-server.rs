@@ -342,7 +342,11 @@ impl ShellMCPServer {
             .context("Missing 'command' parameter")?;
 
         self.runtime.block_on(async {
-            let output = Command::new("which").arg(command).output().await?;
+            let output = timeout(
+                Duration::from_secs(5),
+                Command::new("which").arg(command).output(),
+            )
+            .await??;
 
             let available = output.status.success();
             let path = if available {
@@ -444,7 +448,7 @@ impl ShellMCPServer {
                 cmd.arg("-a");
             }
 
-            let output = cmd.output().await?;
+            let output = timeout(Duration::from_secs(10), cmd.output()).await??;
 
             let mut containers = Vec::new();
             for line in String::from_utf8_lossy(&output.stdout).lines() {
