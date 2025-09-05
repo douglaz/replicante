@@ -5,10 +5,9 @@
 use anyhow::{Context, Result, bail};
 use clap::Parser;
 use serde_json::{Value, json};
+use std::fs;
 use std::io::{self, BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
-use tokio::fs;
-use tokio::runtime::Runtime;
 
 /// Command-line arguments for the filesystem MCP server
 #[derive(Parser, Debug)]
@@ -27,7 +26,6 @@ struct Args {
 struct FilesystemMCPServer {
     initialized: bool,
     workspace_root: PathBuf,
-    runtime: Runtime,
     verbose: bool,
 }
 
@@ -42,12 +40,9 @@ impl FilesystemMCPServer {
             eprintln!("[Filesystem MCP] Workspace root: {:?}", workspace_root);
         }
 
-        let runtime = Runtime::new()?;
-
         Ok(Self {
             initialized: false,
             workspace_root,
-            runtime,
             verbose: args.verbose,
         })
     }
@@ -258,12 +253,9 @@ impl FilesystemMCPServer {
 
         let safe_path = self.safe_path(path)?;
 
-        self.runtime.block_on(async {
-            let content = fs::read_to_string(&safe_path)
-                .await
-                .with_context(|| format!("Failed to read file: {:?}", safe_path))?;
-            Ok(content)
-        })
+        let content = fs::read_to_string(&safe_path)
+            .with_context(|| format!("Failed to read file: {:?}", safe_path))?;
+        Ok(content)
     }
 
     fn write_file(&mut self, args: &Value) -> Result<String> {
@@ -284,26 +276,24 @@ impl FilesystemMCPServer {
 
         let safe_path = self.safe_path(path)?;
 
-        self.runtime.block_on(async {
-            // Create parent directories if needed
-            if let Some(parent) = safe_path.parent() {
-                fs::create_dir_all(parent).await?;
-            }
+        // Create parent directories if needed
+        if let Some(parent) = safe_path.parent() {
+            fs::create_dir_all(parent)?;
+        }
 
-            if append {
-                use tokio::io::AsyncWriteExt;
-                let mut file = fs::OpenOptions::new()
-                    .append(true)
-                    .create(true)
-                    .open(&safe_path)
-                    .await?;
-                file.write_all(content.as_bytes()).await?;
-            } else {
-                fs::write(&safe_path, content).await?;
-            }
+        if append {
+            use std::fs::OpenOptions;
+            use std::io::Write;
+            let mut file = OpenOptions::new()
+                .append(true)
+                .create(true)
+                .open(&safe_path)?;
+            file.write_all(content.as_bytes())?;
+        } else {
+            fs::write(&safe_path, content)?;
+        }
 
-            Ok(format!("Successfully wrote to {}", path))
-        })
+        Ok(format!("Successfully wrote to {}", path))
     }
 
     fn list_directory(&mut self, args: &Value) -> Result<String> {
@@ -316,59 +306,49 @@ impl FilesystemMCPServer {
 
         let safe_path = self.safe_path(path)?;
 
-        self.runtime.block_on(async {
-            let mut entries = Vec::new();
+        let mut entries = Vec::new();
 
-            if recursive {
-                self.list_recursive(&safe_path, &self.workspace_root, &mut entries)
-                    .await?;
-            } else {
-                let mut dir = fs::read_dir(&safe_path).await?;
-                while let Some(entry) = dir.next_entry().await? {
-                    let path = entry.path();
-                    let rel_path = path
-                        .strip_prefix(&self.workspace_root)
-                        .unwrap_or(&path)
-                        .to_string_lossy();
+        if recursive {
+            self.list_recursive(&safe_path, &self.workspace_root, &mut entries)?;
+        } else {
+            for entry in fs::read_dir(&safe_path)? {
+                let entry = entry?;
+                let path = entry.path();
+                let rel_path = path
+                    .strip_prefix(&self.workspace_root)
+                    .unwrap_or(&path)
+                    .to_string_lossy();
 
-                    let metadata = entry.metadata().await?;
-                    let prefix = if metadata.is_dir() { "[DIR] " } else { "" };
-                    entries.push(format!("{}{}", prefix, rel_path));
-                }
+                let metadata = entry.metadata()?;
+                let prefix = if metadata.is_dir() { "[DIR] " } else { "" };
+                entries.push(format!("{}{}", prefix, rel_path));
             }
+        }
 
-            entries.sort();
-            Ok(if entries.is_empty() {
-                "Empty directory".to_string()
-            } else {
-                entries.join("\n")
-            })
+        entries.sort();
+        Ok(if entries.is_empty() {
+            "Empty directory".to_string()
+        } else {
+            entries.join("\n")
         })
     }
 
     #[allow(clippy::only_used_in_recursion)]
-    fn list_recursive<'a>(
-        &'a self,
-        dir: &'a Path,
-        base: &'a Path,
-        entries: &'a mut Vec<String>,
-    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<()>> + 'a>> {
-        Box::pin(async move {
-            let mut dir_entries = fs::read_dir(dir).await?;
-            while let Some(entry) = dir_entries.next_entry().await? {
-                let path = entry.path();
-                let rel_path = path.strip_prefix(base).unwrap_or(&path).to_string_lossy();
+    fn list_recursive(&self, dir: &Path, base: &Path, entries: &mut Vec<String>) -> Result<()> {
+        for entry in fs::read_dir(dir)? {
+            let entry = entry?;
+            let path = entry.path();
+            let rel_path = path.strip_prefix(base).unwrap_or(&path).to_string_lossy();
 
-                let metadata = entry.metadata().await?;
-                if metadata.is_dir() {
-                    entries.push(format!("[DIR] {}", rel_path));
-                    self.list_recursive(&path, base, entries).await?;
-                } else {
-                    entries.push(rel_path.to_string());
-                }
+            let metadata = entry.metadata()?;
+            if metadata.is_dir() {
+                entries.push(format!("[DIR] {}", rel_path));
+                self.list_recursive(&path, base, entries)?;
+            } else {
+                entries.push(rel_path.to_string());
             }
-            Ok(())
-        })
+        }
+        Ok(())
     }
 
     fn create_directory(&mut self, args: &Value) -> Result<String> {
@@ -379,10 +359,8 @@ impl FilesystemMCPServer {
 
         let safe_path = self.safe_path(path)?;
 
-        self.runtime.block_on(async {
-            fs::create_dir_all(&safe_path).await?;
-            Ok(format!("Created directory: {}", path))
-        })
+        fs::create_dir_all(&safe_path)?;
+        Ok(format!("Created directory: {}", path))
     }
 
     fn delete_file(&mut self, args: &Value) -> Result<String> {
@@ -393,21 +371,17 @@ impl FilesystemMCPServer {
 
         let safe_path = self.safe_path(path)?;
 
-        self.runtime.block_on(async {
-            let metadata = fs::metadata(&safe_path).await?;
+        let metadata = fs::metadata(&safe_path)?;
 
-            if metadata.is_dir() {
-                fs::remove_dir(&safe_path)
-                    .await
-                    .with_context(|| format!("Failed to delete directory: {:?}", safe_path))?;
-            } else {
-                fs::remove_file(&safe_path)
-                    .await
-                    .with_context(|| format!("Failed to delete file: {:?}", safe_path))?;
-            }
+        if metadata.is_dir() {
+            fs::remove_dir(&safe_path)
+                .with_context(|| format!("Failed to delete directory: {:?}", safe_path))?;
+        } else {
+            fs::remove_file(&safe_path)
+                .with_context(|| format!("Failed to delete file: {:?}", safe_path))?;
+        }
 
-            Ok(format!("Deleted: {}", path))
-        })
+        Ok(format!("Deleted: {}", path))
     }
 
     fn file_exists(&mut self, args: &Value) -> Result<String> {
@@ -418,26 +392,24 @@ impl FilesystemMCPServer {
 
         let safe_path = self.safe_path(path)?;
 
-        self.runtime.block_on(async {
-            let exists = fs::try_exists(&safe_path).await.unwrap_or(false);
+        let exists = safe_path.exists();
 
-            let result = if exists {
-                let metadata = fs::metadata(&safe_path).await?;
-                json!({
-                    "exists": true,
-                    "type": if metadata.is_dir() { "directory" } else { "file" },
-                    "size": if metadata.is_file() { Some(metadata.len()) } else { None }
-                })
-            } else {
-                json!({
-                    "exists": false,
-                    "type": null,
-                    "size": null
-                })
-            };
+        let result = if exists {
+            let metadata = fs::metadata(&safe_path)?;
+            json!({
+                "exists": true,
+                "type": if metadata.is_dir() { "directory" } else { "file" },
+                "size": if metadata.is_file() { Some(metadata.len()) } else { None }
+            })
+        } else {
+            json!({
+                "exists": false,
+                "type": null,
+                "size": null
+            })
+        };
 
-            Ok(serde_json::to_string(&result)?)
-        })
+        Ok(serde_json::to_string(&result)?)
     }
 
     /// Create error response
