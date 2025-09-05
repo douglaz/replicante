@@ -28,6 +28,10 @@ struct Args {
     /// Enable verbose output
     #[arg(long, env = "MCP_VERBOSE")]
     verbose: bool,
+
+    /// Maximum command output size in megabytes
+    #[arg(long, env = "MAX_OUTPUT_SIZE_MB", default_value = "1")]
+    max_output_size_mb: usize,
 }
 
 /// Shell MCP Server implementation
@@ -37,18 +41,40 @@ struct ShellMCPServer {
     allow_docker: bool,
     runtime: Runtime,
     verbose: bool,
+    max_output_size: usize,
 }
 
 impl ShellMCPServer {
+    /// Helper to truncate output to max size
+    fn truncate_output(&self, output: &[u8]) -> String {
+        if output.len() > self.max_output_size {
+            let truncated = &output[..self.max_output_size];
+            let mut result = String::from_utf8_lossy(truncated).into_owned();
+            result.push_str(&format!(
+                "\n\n[OUTPUT TRUNCATED - {} bytes omitted]",
+                output.len() - self.max_output_size
+            ));
+            result
+        } else {
+            String::from_utf8_lossy(output).into_owned()
+        }
+    }
+
     fn new(args: Args) -> Result<Self> {
         let workspace_root = args
             .workspace
             .canonicalize()
             .unwrap_or_else(|_| args.workspace.clone());
 
+        let max_output_size = args.max_output_size_mb * 1024 * 1024;
+
         if args.verbose {
             eprintln!("[Shell MCP] Workspace root: {:?}", workspace_root);
             eprintln!("[Shell MCP] Docker support: {}", args.allow_docker);
+            eprintln!(
+                "[Shell MCP] Max output size: {} MB",
+                args.max_output_size_mb
+            );
         }
 
         let runtime = Runtime::new()?;
@@ -59,6 +85,7 @@ impl ShellMCPServer {
             allow_docker: args.allow_docker,
             runtime,
             verbose: args.verbose,
+            max_output_size,
         })
     }
 
@@ -322,13 +349,13 @@ impl ShellMCPServer {
 
             if !output.stdout.is_empty() {
                 result.push_str("STDOUT:\n");
-                result.push_str(&String::from_utf8_lossy(&output.stdout));
+                result.push_str(&self.truncate_output(&output.stdout));
                 result.push('\n');
             }
 
             if !output.stderr.is_empty() {
                 result.push_str("STDERR:\n");
-                result.push_str(&String::from_utf8_lossy(&output.stderr));
+                result.push_str(&self.truncate_output(&output.stderr));
             }
 
             Ok(result)
@@ -428,11 +455,11 @@ impl ShellMCPServer {
             let mut result = format!("Exit code: {}\n", output.status.code().unwrap_or(-1));
             if !output.stdout.is_empty() {
                 result.push_str("Output:\n");
-                result.push_str(&String::from_utf8_lossy(&output.stdout));
+                result.push_str(&self.truncate_output(&output.stdout));
             }
             if !output.stderr.is_empty() {
                 result.push_str("Errors:\n");
-                result.push_str(&String::from_utf8_lossy(&output.stderr));
+                result.push_str(&self.truncate_output(&output.stderr));
             }
 
             Ok(result)
@@ -451,7 +478,8 @@ impl ShellMCPServer {
             let output = timeout(Duration::from_secs(10), cmd.output()).await??;
 
             let mut containers = Vec::new();
-            for line in String::from_utf8_lossy(&output.stdout).lines() {
+            let stdout_str = self.truncate_output(&output.stdout);
+            for line in stdout_str.lines() {
                 if !line.trim().is_empty()
                     && let Ok(container) = serde_json::from_str::<Value>(line)
                 {
@@ -473,9 +501,9 @@ impl ShellMCPServer {
             let mut cmd = Command::new("docker");
             cmd.arg("logs");
 
-            if let Some(tail) = args.get("tail").and_then(|t| t.as_u64()) {
-                cmd.arg("--tail").arg(tail.to_string());
-            }
+            // Default to last 1000 lines if not specified, to prevent huge log dumps
+            let tail = args.get("tail").and_then(|t| t.as_u64()).unwrap_or(1000);
+            cmd.arg("--tail").arg(tail.to_string());
 
             cmd.arg(container);
 
@@ -483,10 +511,10 @@ impl ShellMCPServer {
 
             let mut result = String::new();
             if !output.stdout.is_empty() {
-                result.push_str(&String::from_utf8_lossy(&output.stdout));
+                result.push_str(&self.truncate_output(&output.stdout));
             }
             if !output.stderr.is_empty() {
-                result.push_str(&String::from_utf8_lossy(&output.stderr));
+                result.push_str(&self.truncate_output(&output.stderr));
             }
 
             Ok(result)
@@ -514,11 +542,11 @@ impl ShellMCPServer {
             let mut result = format!("Exit code: {}\n", output.status.code().unwrap_or(-1));
             if !output.stdout.is_empty() {
                 result.push_str("Output:\n");
-                result.push_str(&String::from_utf8_lossy(&output.stdout));
+                result.push_str(&self.truncate_output(&output.stdout));
             }
             if !output.stderr.is_empty() {
                 result.push_str("Errors:\n");
-                result.push_str(&String::from_utf8_lossy(&output.stderr));
+                result.push_str(&self.truncate_output(&output.stderr));
             }
 
             Ok(result)

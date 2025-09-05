@@ -6,7 +6,7 @@ use anyhow::{Context, Result, bail};
 use clap::Parser;
 use serde_json::{Value, json};
 use std::fs;
-use std::io::{self, BufRead, BufReader, Write};
+use std::io::{self, BufRead, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
 
 /// Command-line arguments for the filesystem MCP server
@@ -20,6 +20,14 @@ struct Args {
     /// Enable verbose output
     #[arg(long, env = "MCP_VERBOSE")]
     verbose: bool,
+
+    /// Maximum file size to read in megabytes
+    #[arg(long, env = "MAX_FILE_SIZE_MB", default_value = "10")]
+    max_file_size_mb: u64,
+
+    /// Maximum number of directory entries to list
+    #[arg(long, env = "MAX_DIR_ENTRIES", default_value = "10000")]
+    max_dir_entries: usize,
 }
 
 /// Filesystem MCP Server implementation
@@ -27,6 +35,8 @@ struct FilesystemMCPServer {
     initialized: bool,
     workspace_root: PathBuf,
     verbose: bool,
+    max_file_size: u64,
+    max_dir_entries: usize,
 }
 
 impl FilesystemMCPServer {
@@ -36,14 +46,24 @@ impl FilesystemMCPServer {
             .canonicalize()
             .unwrap_or_else(|_| args.workspace.clone());
 
+        let max_file_size = args.max_file_size_mb * 1024 * 1024;
+        let max_dir_entries = args.max_dir_entries;
+
         if args.verbose {
             eprintln!("[Filesystem MCP] Workspace root: {:?}", workspace_root);
+            eprintln!(
+                "[Filesystem MCP] Max file size: {} MB",
+                args.max_file_size_mb
+            );
+            eprintln!("[Filesystem MCP] Max dir entries: {}", max_dir_entries);
         }
 
         Ok(Self {
             initialized: false,
             workspace_root,
             verbose: args.verbose,
+            max_file_size,
+            max_dir_entries,
         })
     }
 
@@ -253,9 +273,39 @@ impl FilesystemMCPServer {
 
         let safe_path = self.safe_path(path)?;
 
-        let content = fs::read_to_string(&safe_path)
-            .with_context(|| format!("Failed to read file: {:?}", safe_path))?;
-        Ok(content)
+        // Check file size before reading
+        let metadata = fs::metadata(&safe_path)
+            .with_context(|| format!("Failed to get metadata for file: {:?}", safe_path))?;
+
+        let file_size = metadata.len();
+        if file_size > self.max_file_size {
+            bail!(
+                "File too large: {} MB (max allowed: {} MB)",
+                file_size / (1024 * 1024),
+                self.max_file_size / (1024 * 1024)
+            );
+        }
+
+        // For files near the limit, read with buffer to ensure we don't exceed memory
+        if file_size > self.max_file_size / 2 {
+            let file = fs::File::open(&safe_path)
+                .with_context(|| format!("Failed to open file: {:?}", safe_path))?;
+            let mut buffer = String::new();
+            let mut handle = file.take(self.max_file_size);
+            handle
+                .read_to_string(&mut buffer)
+                .with_context(|| format!("Failed to read file: {:?}", safe_path))?;
+
+            if buffer.len() as u64 >= self.max_file_size {
+                buffer.push_str("\n\n[FILE TRUNCATED - EXCEEDED SIZE LIMIT]");
+            }
+            Ok(buffer)
+        } else {
+            // Small files can be read normally
+            let content = fs::read_to_string(&safe_path)
+                .with_context(|| format!("Failed to read file: {:?}", safe_path))?;
+            Ok(content)
+        }
     }
 
     fn write_file(&mut self, args: &Value) -> Result<String> {
@@ -307,11 +357,16 @@ impl FilesystemMCPServer {
         let safe_path = self.safe_path(path)?;
 
         let mut entries = Vec::new();
+        let mut truncated = false;
 
         if recursive {
             self.list_recursive(&safe_path, &self.workspace_root, &mut entries)?;
         } else {
             for entry in fs::read_dir(&safe_path)? {
+                if entries.len() >= self.max_dir_entries {
+                    truncated = true;
+                    break;
+                }
                 let entry = entry?;
                 let path = entry.path();
                 let rel_path = path
@@ -326,16 +381,29 @@ impl FilesystemMCPServer {
         }
 
         entries.sort();
-        Ok(if entries.is_empty() {
+
+        let mut result = if entries.is_empty() {
             "Empty directory".to_string()
         } else {
             entries.join("\n")
-        })
+        };
+
+        if truncated || entries.len() >= self.max_dir_entries {
+            result.push_str(&format!(
+                "\n\n[LISTING TRUNCATED - SHOWING FIRST {} ENTRIES]",
+                self.max_dir_entries
+            ));
+        }
+
+        Ok(result)
     }
 
     #[allow(clippy::only_used_in_recursion)]
     fn list_recursive(&self, dir: &Path, base: &Path, entries: &mut Vec<String>) -> Result<()> {
         for entry in fs::read_dir(dir)? {
+            if entries.len() >= self.max_dir_entries {
+                break; // Stop if we've hit the limit
+            }
             let entry = entry?;
             let path = entry.path();
             let rel_path = path.strip_prefix(base).unwrap_or(&path).to_string_lossy();
@@ -343,7 +411,9 @@ impl FilesystemMCPServer {
             let metadata = entry.metadata()?;
             if metadata.is_dir() {
                 entries.push(format!("[DIR] {}", rel_path));
-                self.list_recursive(&path, base, entries)?;
+                if entries.len() < self.max_dir_entries {
+                    self.list_recursive(&path, base, entries)?;
+                }
             } else {
                 entries.push(rel_path.to_string());
             }
