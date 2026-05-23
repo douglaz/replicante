@@ -1,15 +1,13 @@
-# cargo-deny configuration
+# cargo-deny configuration (cargo-deny 0.19+)
 # https://embarkstudios.github.io/cargo-deny/
 #
 # Copy to repo root as deny.toml
 
 [advisories]
-db-path = "~/.cargo/advisory-db"
-db-urls = ["https://github.com/rustsec/advisory-db"]
 vulnerability = "deny"
-unmaintained = "warn"
-yanked = "warn"
-notice = "warn"
+unmaintained = "workspace"
+yanked = "workspace"
+notice = "workspace"
 
 [licenses]
 unlicensed = "deny"
@@ -27,7 +25,6 @@ allow = [
     "CC0-1.0",
     "MPL-2.0",
 ]
-copyleft = "warn"
 
 [bans]
 multiple-versions = "warn"
