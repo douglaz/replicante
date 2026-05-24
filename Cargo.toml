@@ -61,7 +61,7 @@ tower-http = { version = "0.5", features = ["cors"] }
 url = "2.5"
 
 # Math expression evaluation (for MCP servers)
-evalexpr = "11.3"
+evalexpr = "13.1"
 
 # Random number generation (for MCP servers)
 rand = "0.8"
