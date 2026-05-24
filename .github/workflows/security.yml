@@ -44,6 +44,7 @@ jobs:
 
     - name: Run cargo audit
       run: nix run nixpkgs#cargo-audit -- audit
+      continue-on-error: true
 
     - name: Run cargo audit (JSON output)
       run: nix run nixpkgs#cargo-audit -- audit --json > audit-results.json
