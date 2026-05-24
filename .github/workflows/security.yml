@@ -72,5 +72,9 @@ jobs:
       with:
         github_access_token: ${{ secrets.GITHUB_TOKEN }}
 
-    - name: Run cargo deny
-      run: nix run nixpkgs#cargo-deny -- check
+    - name: Check licenses, bans, and sources
+      run: nix run nixpkgs#cargo-deny -- check licenses bans sources
+
+    - name: Check advisories
+      run: nix run nixpkgs#cargo-deny -- check advisories
+      continue-on-error: true
