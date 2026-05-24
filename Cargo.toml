@@ -64,7 +64,7 @@ url = "2.5"
 evalexpr = "11.3"
 
 # Random number generation (for MCP servers)
-rand = "0.8"
+rand = "0.10"
 
 # Command-line argument parsing
 clap = { version = "4.5", features = ["derive", "env"] }
