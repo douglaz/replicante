@@ -23,7 +23,7 @@ serde_json = "1.0"
 toml = "0.8"
 
 # Configuration
-config = "0.13"
+config = "0.15"
 
 # Logging
 tracing = "0.1"
