@@ -43,7 +43,7 @@ jobs:
           experimental-features = nix-command flakes
     
     - name: Cache cargo registry
-      uses: actions/cache@v5
+      uses: actions/cache@v6
       with:
         path: |
           ~/.cargo/registry/index/
@@ -54,7 +54,7 @@ jobs:
           ${{ runner.os }}-cargo-registry-
 
     - name: Cache target directory
-      uses: actions/cache@v5
+      uses: actions/cache@v6
       with:
         path: target/
         key: ${{ runner.os }}-target-check-${{ hashFiles('**/Cargo.lock') }}
@@ -87,7 +87,7 @@ jobs:
           experimental-features = nix-command flakes
     
     - name: Cache cargo registry
-      uses: actions/cache@v5
+      uses: actions/cache@v6
       with:
         path: |
           ~/.cargo/registry/index/
@@ -98,7 +98,7 @@ jobs:
           ${{ runner.os }}-cargo-registry-
 
     - name: Cache target directory
-      uses: actions/cache@v5
+      uses: actions/cache@v6
       with:
         path: target/
         key: ${{ runner.os }}-target-test-${{ hashFiles('**/Cargo.lock') }}
@@ -137,7 +137,7 @@ jobs:
           experimental-features = nix-command flakes
     
     - name: Cache cargo registry
-      uses: actions/cache@v5
+      uses: actions/cache@v6
       with:
         path: |
           ~/.cargo/registry/index/
@@ -148,7 +148,7 @@ jobs:
           ${{ runner.os }}-cargo-registry-
 
     - name: Cache target directory (musl)
-      uses: actions/cache@v5
+      uses: actions/cache@v6
       with:
         path: target/
         key: ${{ runner.os }}-target-musl-${{ hashFiles('**/Cargo.lock') }}
